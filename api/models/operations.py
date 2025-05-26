@@ -71,6 +71,7 @@ class Operations(BaseModel):
     hash: Optional[str]
     blockNumber: Optional[int] = None
     operId_: Optional[int] = None
+    bucket_index: Optional[int] = None
     gas: Optional[int] = None
     gasPrice: Optional[str] = None
     gasUsed: Optional[int] = None
@@ -95,6 +96,7 @@ class Operations(BaseModel):
                 "hash": "0xaddc1a3b49fcd5528a4a394d98e095c1f89475e1e30b9a237e93231c15e4a265",
                 "blockNumber": 4643915,
                 "operId_": 13,
+                "bucket_index": 0,
                 "gas": 4500000,
                 "gasPrice": "66458000",
                 "gasUsed": 117984,

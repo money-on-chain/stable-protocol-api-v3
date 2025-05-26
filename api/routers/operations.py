@@ -86,8 +86,11 @@ async def operations_list(
 )
 async def operations_oper_id(
         oper_id: Annotated[int, Query(
-            title="Recipient address",
-            description="Recipient address")] = 13
+            title="Operation ID",
+            description="Operation ID")] = 13,
+        bucket_index: Annotated[int, Query(
+            title="Bucket Index",
+            description="Bucket Index")] = 0
 ):
 
     # get mongo db connection
@@ -97,7 +100,8 @@ async def operations_oper_id(
         raise HTTPException(status_code=400, detail="Cannot get DB")
 
     query_filter = {
-        "operId_": oper_id
+        "operId_": oper_id,
+        "bucket_index": bucket_index
     }
 
     operations = await db["operations"]\
