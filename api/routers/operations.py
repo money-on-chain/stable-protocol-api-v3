@@ -46,7 +46,8 @@ async def operations_list(
     }
 
     operations = await db["operations"]\
-        .find(query_filter)\
+        .find(query_filter) \
+        .sort("createdAt", -1) \
         .skip(skip)\
         .limit(limit)\
         .to_list(limit)
