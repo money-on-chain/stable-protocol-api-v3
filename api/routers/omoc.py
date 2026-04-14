@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Query, HTTPException
 from typing import Annotated
+from pymongo.collation import Collation
 
 from api.db import get_db
+
 from api.models.omoc import DATE_FIELDS, \
     VestingCreatedList, \
     ClaimOKList, \
@@ -17,6 +19,7 @@ from api.models.omoc import DATE_FIELDS, \
 from api.utils import fields_date_to_str
 
 
+collation = Collation(locale="en", strength=2)
 router = APIRouter()
 
 
@@ -30,7 +33,7 @@ async def vesting_created(
         holder: Annotated[str, Query(
             title="Holder address",
             description="Holder Address",
-            regex='^0x[a-fA-F0-9]{40}$')] = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3',
+            pattern='^0x[a-fA-F0-9]{40}$')] = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3',
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
@@ -47,17 +50,17 @@ async def vesting_created(
         raise HTTPException(status_code=400, detail="Cannot get DB")
 
     query_filter = {
-        "holder": {"$regex": holder.lower(), '$options': 'i'}
+        "holder": holder.lower()
     }
 
     rows = await db["event_VestingFactory_VestingCreated"]\
-        .find(query_filter)\
+        .find(query_filter, collation=collation)\
         .sort("createdAt", -1)\
         .skip(skip)\
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VestingFactory_VestingCreated"].count_documents(query_filter)
+    rows_count = await db["event_VestingFactory_VestingCreated"].count_documents(query_filter, collation=collation)
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -92,7 +95,7 @@ async def claim_ok(
         holder: Annotated[str, Query(
             title="Holder address",
             description="Holder Address",
-            regex='^0x[a-fA-F0-9]{40}$')] = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3',
+            pattern='^0x[a-fA-F0-9]{40}$')] = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3',
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
@@ -109,17 +112,17 @@ async def claim_ok(
         raise HTTPException(status_code=400, detail="Cannot get DB")
 
     query_filter = {
-        "recipient": {"$regex": holder.lower(), '$options': 'i'}
+        "recipient": holder.lower()
     }
 
     rows = await db["event_IncentiveV2_ClaimOK"]\
-        .find(query_filter)\
+        .find(query_filter, collation=collation)\
         .sort("createdAt", -1)\
         .skip(skip)\
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_IncentiveV2_ClaimOK"].count_documents(query_filter)
+    rows_count = await db["event_IncentiveV2_ClaimOK"].count_documents(query_filter, collation=collation)
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
