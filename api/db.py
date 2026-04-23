@@ -19,8 +19,11 @@ async def get_db() -> AsyncIOMotorClient:
 
 async def connect_and_init_db():
     global db_client
+    mongo_uri = getenv("APP_MONGO_URI")
+    if not mongo_uri or mongo_uri == "SET_VIA_APP_MONGO_URI_ENV":
+        raise RuntimeError("APP_MONGO_URI environment variable is not set")
     try:
-        db_client = AsyncIOMotorClient(getenv("APP_MONGO_URI", default="mongodb://localhost:27017"))
+        db_client = AsyncIOMotorClient(mongo_uri)
         log.info('Connected to mongo.')
     except Exception as e:
         log.exception(f'Could not connect to mongo: {e}')
