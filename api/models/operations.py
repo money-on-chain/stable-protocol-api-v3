@@ -56,6 +56,10 @@ class Executed(BaseModel):
     qFeeToken_: Optional[str] = None
     qACVendorMarkup_: Optional[str] = None
     qFeeTokenVendorMarkup_: Optional[str] = None
+    qACtoRedeemTC_: Optional[str] = None
+    qACtoRedeemTP_: Optional[str] = None
+    qACtoMintTC_: Optional[str] = None
+    qACtoMintTP_: Optional[str] = None
     vendor_: Optional[str] = None
     operId_: Optional[int] = None
     sender_: Optional[str] = None
@@ -143,6 +147,10 @@ class Operations(BaseModel):
                     "qFeeToken_": "0",
                     "qACVendorMarkup_": "5209907159454",
                     "qFeeTokenVendorMarkup_": "0",
+                    "qACtoRedeemTC_": None,
+                    "qACtoRedeemTP_": None,
+                    "qACtoMintTC_": None,
+                    "qACtoMintTP_": None,
                     "vendor_": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
                     "operId_": 13,
                     "sender_": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
