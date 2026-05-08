@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException
 from typing import Annotated
+from os import getenv
 from pymongo.collation import Collation
 
 from api.db import get_db
@@ -9,6 +10,9 @@ from api.logger import log
 
 
 collation = Collation(locale="en", strength=2)
+
+_blacklist_env = getenv("OPERATIONS_BLACKLIST", default=None)
+OPERATIONS_BLACKLIST = [addr.strip().lower() for addr in _blacklist_env.split(",") if addr.strip()] if _blacklist_env else []
 
 router = APIRouter()
 
@@ -64,6 +68,14 @@ async def operations_list(
             {"executed.sender_": recipient}
         ]
     }
+
+    if OPERATIONS_BLACKLIST:
+        query_filter["$nor"] = [
+            {"params.recipient": {"$in": OPERATIONS_BLACKLIST}},
+            {"params.sender": {"$in": OPERATIONS_BLACKLIST}},
+            {"executed.recipient_": {"$in": OPERATIONS_BLACKLIST}},
+            {"executed.sender_": {"$in": OPERATIONS_BLACKLIST}}
+        ]
 
     operations = await db["operations"]\
         .find(query_filter, collation=collation) \
