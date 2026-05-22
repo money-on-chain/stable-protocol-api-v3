@@ -2,6 +2,11 @@
 
 ## Warning: This is only for version 3 of the main contracts.
 
+| Project              | Version | V3 | 
+|----------------------|---------|----|
+| MOC (Money on Chain) | V1      | ❌  |
+| ROC (RIF on Chain)   | V3      | ✅  |
+
 API list operations of the users dapp. This is a requirement for [stable-protocol-interface-v2](https://github.com/money-on-chain/stable-protocol-interface-v2), this service list operations of the users.
 
 ### Usage
