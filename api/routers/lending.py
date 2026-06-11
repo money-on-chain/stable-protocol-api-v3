@@ -15,6 +15,7 @@ from api.models.lending import (
     EventLendingOperationQueuedList,
     EventLendingOperationErrorList,
     EventLendingOperationExecutedList,
+    LendingUserOperationList,
     DATE_FIELDS,
 )
 from api.utils import fields_date_to_str
@@ -352,3 +353,46 @@ async def lending_operation_executed(
         query_filter = {"operId": oper_id}
 
     return await _query_collection(db, "event_Lending_OperationExecuted", query_filter, limit, skip)
+
+
+VALID_EVENT_NAMES = {
+    "Deposit", "Withdraw", "AddACtoVault", "RemoveACfromVault",
+    "Borrow", "Repay", "RepayWithAC", "Liquidate"
+}
+
+
+@router.get(
+    "/v1/lending/user_operations/",
+    tags=["lending"],
+    response_description="Unified lending activity feed for a user across all event types",
+    response_model=LendingUserOperationList
+)
+async def lending_user_operations(
+        user: Annotated[Optional[str], Query(
+            title="User address",
+            description="Filter by user address",
+            pattern=ADDRESS_PATTERN)] = None,
+        event_name: Annotated[Optional[str], Query(
+            title="Event name",
+            description="Filter by event type: Deposit, Withdraw, AddACtoVault, RemoveACfromVault, Borrow, Repay, RepayWithAC, Liquidate"
+        )] = None,
+        limit: Annotated[int, Query(title="Limit", description="Limit", le=1000)] = 20,
+        skip: Annotated[int, Query(title="Skip", description="Skip", le=10000)] = 0
+):
+    db = await get_db()
+    if db is None:
+        raise HTTPException(status_code=400, detail="Cannot get DB")
+
+    if event_name is not None and event_name not in VALID_EVENT_NAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid event_name. Valid values: {', '.join(sorted(VALID_EVENT_NAMES))}"
+        )
+
+    query_filter = {}
+    if user:
+        query_filter["user"] = user.lower()
+    if event_name:
+        query_filter["eventName"] = event_name
+
+    return await _query_collection(db, "lending_user_operations", query_filter, limit, skip)

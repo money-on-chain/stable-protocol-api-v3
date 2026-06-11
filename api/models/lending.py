@@ -1,6 +1,6 @@
 import datetime
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 import uuid
 
 
@@ -553,6 +553,54 @@ class EventLendingOperationExecuted(BaseModel):
 
 class EventLendingOperationExecutedList(BaseModel):
     rows: List[EventLendingOperationExecuted]
+    count: int = 0
+    total: int = 0
+    last_block_indexed: int = 0
+
+    class Config:
+        json_schema_extra = {
+            "example": {"rows": "[]", "count": "0", "total": "0", "last_block_indexed": "12345678"}
+        }
+
+
+# LendingUserOperation — unified activity feed across all lending event types
+
+class LendingUserOperation(BaseModel):
+    id: str = Field(default_factory=uuid.uuid4, alias="_id")
+    id_event: Optional[str] = None
+    hash: Optional[str] = None
+    blockNumber: Optional[int] = None
+    eventName: Optional[str] = None
+    user: Optional[str] = None
+    tpToken: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
+    createdAt: Optional[datetime.datetime] = None
+    lastUpdatedAt: Optional[datetime.datetime] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "_id": EXAMPLE_ID,
+                "id_event": f"{EXAMPLE_HASH}:14",
+                "hash": EXAMPLE_HASH,
+                "blockNumber": EXAMPLE_BLOCK,
+                "eventName": "Borrow",
+                "user": EXAMPLE_USER,
+                "tpToken": EXAMPLE_TP_TOKEN,
+                "extra": {
+                    "recipient": EXAMPLE_USER,
+                    "mocBucket": EXAMPLE_BUCKET,
+                    "tpAmount": EXAMPLE_AMOUNT,
+                    "creditUnits": "4900000000000000000"
+                },
+                "createdAt": None,
+                "lastUpdatedAt": EXAMPLE_UPDATED
+            }
+        }
+
+
+class LendingUserOperationList(BaseModel):
+    rows: List[LendingUserOperation]
     count: int = 0
     total: int = 0
     last_block_indexed: int = 0
