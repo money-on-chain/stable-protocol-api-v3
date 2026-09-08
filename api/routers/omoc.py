@@ -31,7 +31,9 @@ from api.models.omoc import DATE_FIELDS, \
     CoinPairPriceForcedPriceQueryModeSetList, \
     CoinPairPriceOracleRewardTransferList, \
     CoinPairPriceNewRoundList, \
-    CoinPairPriceOracleAutoUnsubscribedList
+    CoinPairPriceOracleAutoUnsubscribedList, \
+    TasksRunnerTaskExecutedList, \
+    TaskTriggerOrderTriggerOrdersRevertedList
 from api.utils import fields_date_to_str
 
 
@@ -1539,6 +1541,118 @@ async def coin_pair_price_oracle_auto_unsubscribed(
         .to_list(limit)
 
     rows_count = await db["event_CoinPairPrice_OracleAutoUnsubscribed"].count_documents(query_filter)
+
+    for trx in rows:
+        trx['_id'] = str(trx['_id'])
+        fields_date_to_str(trx, DATE_FIELDS)
+
+    # Last block indexed
+    indexer = await db["moc_indexer"] \
+        .find_one(sort=[("updatedAt", -1)])
+
+    last_block_indexed = 0
+    if indexer:
+        if 'last_raw_tx_block' in indexer:
+            last_block_indexed = indexer['last_raw_tx_block']
+
+    dict_values = {
+        "results": rows,
+        "count": len(rows),
+        "total": rows_count,
+        "last_block_indexed": last_block_indexed
+    }
+
+    return dict_values
+
+
+@router.get(
+    "/v1/omoc/tasks_runner_task_executed/",
+    tags=["omoc"],
+    response_description="Returns TasksRunner task executed events",
+    response_model=TasksRunnerTaskExecutedList
+)
+async def tasks_runner_task_executed(
+        limit: Annotated[int, Query(
+            title="Limit",
+            description="Limit",
+            le=100)] = 20,
+        skip: Annotated[int, Query(
+            title="Skip",
+            description="Skip",
+            le=1000)] = 0):
+
+    # get mongo db connection
+    db = await get_db()
+
+    if db is None:
+        raise HTTPException(status_code=400, detail="Cannot get DB")
+
+    query_filter = {}
+
+    rows = await db["event_TasksRunner_TaskExecuted"]\
+        .find(query_filter)\
+        .sort("createdAt", -1)\
+        .skip(skip)\
+        .limit(limit)\
+        .to_list(limit)
+
+    rows_count = await db["event_TasksRunner_TaskExecuted"].count_documents(query_filter)
+
+    for trx in rows:
+        trx['_id'] = str(trx['_id'])
+        fields_date_to_str(trx, DATE_FIELDS)
+
+    # Last block indexed
+    indexer = await db["moc_indexer"] \
+        .find_one(sort=[("updatedAt", -1)])
+
+    last_block_indexed = 0
+    if indexer:
+        if 'last_raw_tx_block' in indexer:
+            last_block_indexed = indexer['last_raw_tx_block']
+
+    dict_values = {
+        "results": rows,
+        "count": len(rows),
+        "total": rows_count,
+        "last_block_indexed": last_block_indexed
+    }
+
+    return dict_values
+
+
+@router.get(
+    "/v1/omoc/task_trigger_order_trigger_orders_reverted/",
+    tags=["omoc"],
+    response_description="Returns TaskTriggerOrder trigger orders reverted events",
+    response_model=TaskTriggerOrderTriggerOrdersRevertedList
+)
+async def task_trigger_order_trigger_orders_reverted(
+        limit: Annotated[int, Query(
+            title="Limit",
+            description="Limit",
+            le=100)] = 20,
+        skip: Annotated[int, Query(
+            title="Skip",
+            description="Skip",
+            le=1000)] = 0):
+
+    # get mongo db connection
+    db = await get_db()
+
+    if db is None:
+        raise HTTPException(status_code=400, detail="Cannot get DB")
+
+    query_filter = {}
+
+    rows = await db["event_TaskTriggerOrder_TriggerOrdersReverted"]\
+        .find(query_filter)\
+        .sort("createdAt", -1)\
+        .skip(skip)\
+        .limit(limit)\
+        .to_list(limit)
+
+    rows_count = await db["event_TaskTriggerOrder_TriggerOrdersReverted"].count_documents(query_filter)
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
