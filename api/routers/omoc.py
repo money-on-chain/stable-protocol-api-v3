@@ -196,7 +196,7 @@ async def delay_machine_payment_cancel(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_DelayMachine_PaymentCancel"].count_documents(query_filter)
+    rows_count = await db["event_DelayMachine_PaymentCancel"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -252,7 +252,7 @@ async def delay_machine_payment_deposit(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_DelayMachine_PaymentDeposit"].count_documents(query_filter)
+    rows_count = await db["event_DelayMachine_PaymentDeposit"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -308,7 +308,7 @@ async def delay_machine_payment_withdraw(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_DelayMachine_PaymentWithdraw"].count_documents(query_filter)
+    rows_count = await db["event_DelayMachine_PaymentWithdraw"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -364,7 +364,7 @@ async def supporters_add_stake(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_Supporters_AddStake"].count_documents(query_filter)
+    rows_count = await db["event_Supporters_AddStake"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -420,7 +420,7 @@ async def supporters_cancel_earnings(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_Supporters_CancelEarnings"].count_documents(query_filter)
+    rows_count = await db["event_Supporters_CancelEarnings"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -476,7 +476,7 @@ async def supporters_pay_earnings(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_Supporters_PayEarnings"].count_documents(query_filter)
+    rows_count = await db["event_Supporters_PayEarnings"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -532,7 +532,7 @@ async def supporters_withdraw(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_Supporters_Withdraw"].count_documents(query_filter)
+    rows_count = await db["event_Supporters_Withdraw"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -588,7 +588,7 @@ async def supporters_withdraw_stake(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_Supporters_WithdrawStake"].count_documents(query_filter)
+    rows_count = await db["event_Supporters_WithdrawStake"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -644,7 +644,7 @@ async def voting_machine_vote_event(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VotingMachine_VoteEvent"].count_documents(query_filter)
+    rows_count = await db["event_VotingMachine_VoteEvent"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -700,7 +700,7 @@ async def voting_machine_pre_vote_event(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VotingMachine_PreVoteEvent"].count_documents(query_filter)
+    rows_count = await db["event_VotingMachine_PreVoteEvent"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -756,7 +756,7 @@ async def voting_machine_pre_vote_step_event(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VotingMachine_PreVoteStepEvent"].count_documents(query_filter)
+    rows_count = await db["event_VotingMachine_PreVoteStepEvent"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -812,7 +812,7 @@ async def voting_machine_vote_step_event(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VotingMachine_VoteStepEvent"].count_documents(query_filter)
+    rows_count = await db["event_VotingMachine_VoteStepEvent"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -868,7 +868,7 @@ async def voting_machine_accepted_step_event(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VotingMachine_AcceptedStepEvent"].count_documents(query_filter)
+    rows_count = await db["event_VotingMachine_AcceptedStepEvent"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -924,7 +924,7 @@ async def voting_machine_unregister_event(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VotingMachine_UnregisterEvent"].count_documents(query_filter)
+    rows_count = await db["event_VotingMachine_UnregisterEvent"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -980,7 +980,7 @@ async def oracle_manager_oracle_registered(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_OracleManager_OracleRegistered"].count_documents(query_filter)
+    rows_count = await db["event_OracleManager_OracleRegistered"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1036,7 +1036,7 @@ async def oracle_manager_oracle_stake_added(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_OracleManager_OracleStakeAdded"].count_documents(query_filter)
+    rows_count = await db["event_OracleManager_OracleStakeAdded"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1092,7 +1092,7 @@ async def oracle_manager_oracle_subscribed(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_OracleManager_OracleSubscribed"].count_documents(query_filter)
+    rows_count = await db["event_OracleManager_OracleSubscribed"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1148,7 +1148,7 @@ async def oracle_manager_oracle_unsubscribed(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_OracleManager_OracleUnsubscribed"].count_documents(query_filter)
+    rows_count = await db["event_OracleManager_OracleUnsubscribed"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1204,7 +1204,7 @@ async def oracle_manager_oracle_removed(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_OracleManager_OracleRemoved"].count_documents(query_filter)
+    rows_count = await db["event_OracleManager_OracleRemoved"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1260,7 +1260,7 @@ async def coin_pair_price_price_published(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_CoinPairPrice_PricePublished"].count_documents(query_filter)
+    rows_count = await db["event_CoinPairPrice_PricePublished"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1316,7 +1316,7 @@ async def coin_pair_price_emergency_price_published(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_CoinPairPrice_EmergencyPricePublished"].count_documents(query_filter)
+    rows_count = await db["event_CoinPairPrice_EmergencyPricePublished"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1372,7 +1372,7 @@ async def coin_pair_price_forced_price_query_mode_set(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_CoinPairPrice_ForcedPriceQueryModeSet"].count_documents(query_filter)
+    rows_count = await db["event_CoinPairPrice_ForcedPriceQueryModeSet"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1428,7 +1428,7 @@ async def coin_pair_price_oracle_reward_transfer(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_CoinPairPrice_OracleRewardTransfer"].count_documents(query_filter)
+    rows_count = await db["event_CoinPairPrice_OracleRewardTransfer"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1484,7 +1484,7 @@ async def coin_pair_price_new_round(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_CoinPairPrice_NewRound"].count_documents(query_filter)
+    rows_count = await db["event_CoinPairPrice_NewRound"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1540,7 +1540,7 @@ async def coin_pair_price_oracle_auto_unsubscribed(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_CoinPairPrice_OracleAutoUnsubscribed"].count_documents(query_filter)
+    rows_count = await db["event_CoinPairPrice_OracleAutoUnsubscribed"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1596,7 +1596,7 @@ async def tasks_runner_task_executed(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_TasksRunner_TaskExecuted"].count_documents(query_filter)
+    rows_count = await db["event_TasksRunner_TaskExecuted"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -1652,7 +1652,7 @@ async def task_trigger_order_trigger_orders_reverted(
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_TaskTriggerOrder_TriggerOrdersReverted"].count_documents(query_filter)
+    rows_count = await db["event_TaskTriggerOrder_TriggerOrdersReverted"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])

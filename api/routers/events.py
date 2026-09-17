@@ -42,7 +42,7 @@ async def event_moc_settlement_executed(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_Moc_SettlementExecuted"].count_documents(query_filter)
+    rows_count = await db["event_Moc_SettlementExecuted"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -97,7 +97,7 @@ async def moc_success_fee_distributed(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_Moc_SuccessFeeDistributed"].count_documents(query_filter)
+    rows_count = await db["event_Moc_SuccessFeeDistributed"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -152,7 +152,7 @@ async def moc_tc_interest_payment(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_Moc_TCInterestPayment"].count_documents(query_filter)
+    rows_count = await db["event_Moc_TCInterestPayment"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -207,7 +207,7 @@ async def moc_tp_ema_updated(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_Moc_TPemaUpdated"].count_documents(query_filter)
+    rows_count = await db["event_Moc_TPemaUpdated"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -262,7 +262,7 @@ async def moc_queue_operation_error(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_MocQueue_OperationError"].count_documents(query_filter)
+    rows_count = await db["event_MocQueue_OperationError"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -317,7 +317,7 @@ async def moc_queue_operation_executed(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_MocQueue_OperationExecuted"].count_documents(query_filter)
+    rows_count = await db["event_MocQueue_OperationExecuted"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
@@ -372,7 +372,7 @@ async def moc_queue_operation_queued(
         .limit(limit) \
         .to_list(limit)
 
-    rows_count = await db["event_MocQueue_OperationQueued"].count_documents(query_filter)
+    rows_count = await db["event_MocQueue_OperationQueued"].estimated_document_count()
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
