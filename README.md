@@ -65,4 +65,9 @@ docker run -d \
 stable_protocol_api_v2
 ```
 
+The `/v1/omoc/voting/proposals/{address}/content/` endpoint serves a proposal's write-up from the governance forum (Discourse), looked up by its changer address and cached in memory. Both settings are optional:
+
+- `GOVERNANCE_FORUM_URL` — forum base url, defaults to `https://forum.moneyonchain.com`. Set it empty to disable the lookup (the endpoint then always returns 404).
+- `GOVERNANCE_FORUM_TOPICS` — JSON object of changer address → topic id, for proposals the forum search can't resolve, e.g. `'{"0x015F2836467Ce43E27D22b0d03929c371Ff1d0f1": 468}'`.
+
 

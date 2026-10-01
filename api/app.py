@@ -9,6 +9,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from api.routers import operations
 from api.routers import events
 from api.routers import omoc
+from api.routers import voting
 from api.routers import lending
 from api.models.base import InfoApi
 from api.logger import log
@@ -56,6 +57,7 @@ lifespan=lifespan
 app.include_router(operations.router)
 app.include_router(events.router)
 app.include_router(omoc.router)
+app.include_router(voting.router)
 app.include_router(lending.router)
 
 
