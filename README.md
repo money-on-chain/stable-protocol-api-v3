@@ -65,9 +65,8 @@ docker run -d \
 stable_protocol_api_v2
 ```
 
-The `/v1/omoc/voting/proposals/{address}/content/` endpoint serves a proposal's write-up from the governance forum (Discourse), looked up by its changer address and cached in memory. Both settings are optional:
+The `/v1/omoc/voting/` endpoints serve the OMoC proposal history from the indexed VotingMachine events, matched by changer address to the MIP documents of the proposal registry ([money-on-chain/proposals-changers](https://github.com/money-on-chain/proposals-changers), `docs/proposals/proposals.json`). The registry and its documents are cached in memory for 5 minutes, and the last good copy is kept if a refresh fails.
 
-- `GOVERNANCE_FORUM_URL` — forum base url, defaults to `https://forum.moneyonchain.com`. Set it empty to disable the lookup (the endpoint then always returns 404).
-- `GOVERNANCE_FORUM_TOPICS` — JSON object of changer address → topic id, for proposals the forum search can't resolve, e.g. `'{"0x015F2836467Ce43E27D22b0d03929c371Ff1d0f1": 468}'`.
+- `GOVERNANCE_REGISTRY_URL` — url of `proposals.json`; documents and images are resolved relative to it. Defaults to the `proposals_registry` branch on raw.githubusercontent.com. Set it empty to disable the registry (proposals are then served with `listed: null`).
 
 
