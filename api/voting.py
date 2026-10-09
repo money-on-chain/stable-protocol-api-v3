@@ -95,6 +95,7 @@ async def _pre_vote_totals(db, match):
         out[key] = {
             "votes": wei_str(row["votes"]),
             "voters": len(row["voters"]),
+            "voterSet": set(row["voters"]),
             "proposer": row["first"].get("user"),
             "submitted": row["first"],
             "lastAt": row["lastAt"],
@@ -125,6 +126,7 @@ async def _vote_totals(db, match):
             "against": str(against),
             "total": str(in_favor + against),
             "voters": len(row["voters"]),
+            "voterSet": set(row["voters"]),
             "lastAt": row["lastAt"],
         }
     return out
@@ -159,10 +161,16 @@ def _status(key, pre_vote, pre_vote_step, vote_step, accepted_step,
     return "PreVoting"
 
 
-async def build_proposal_records(db, proposal=None, keys=None):
+async def build_proposal_records(db, proposal=None, keys=None, proposals=None):
     """All (proposal, round) records, newest round first. `proposal` limits
-    them to one ChangeContract address, `keys` to a set of (proposal, round)."""
+    them to one ChangeContract address, `proposals` to a list of them and
+    `keys` to a set of (proposal, round)."""
     match = {"proposal": proposal} if proposal else {}
+    if proposals is not None:
+        proposals = {p.lower() for p in proposals}
+        if not proposals:
+            return []
+        match = {"proposal": {"$in": sorted(proposals)}}
     if keys is not None:
         if not keys:
             return []
@@ -178,6 +186,7 @@ async def build_proposal_records(db, proposal=None, keys=None):
     all_pre_vote_steps = await _last_step_events(db, PRE_VOTE_STEP, {})
     pre_vote_step = {k: v for k, v in all_pre_vote_steps.items()
                      if (not proposal or k[0] == proposal)
+                     and (proposals is None or k[0] in proposals)
                      and (keys is None or k in keys)}
     round_winners = {r: p for p, r in all_pre_vote_steps}
 
@@ -210,6 +219,14 @@ async def build_proposal_records(db, proposal=None, keys=None):
         vs = vote_step.get(key)
         acs = accepted_step.get(key)
         unr = unregister.get(key)
+        # preVoteStep() starts the voting with the winner's pre-vote support
+        # as votes in favor (VotingDataLib._startVoting); vote() only adds to
+        # it, so a proposal can pass without a single VoteEvent.
+        from_pre_vote = int(pvs.get("votesInFavor") or 0) if pvs else 0
+        in_favor = from_pre_vote + int(vt["inFavor"] if vt else 0)
+        against = int(vt["against"] if vt else 0)
+        supporters = ((pv["voterSet"] if pv else set())
+                      | (vt["voterSet"] if vt else set()))
         records.append({
             "proposal": key[0],
             "round": key[1],
@@ -225,11 +242,17 @@ async def build_proposal_records(db, proposal=None, keys=None):
             },
             "preVoteStep": {**_tx(pvs), "votesInFavor": pvs.get("votesInFavor")}
             if pvs else None,
+            # Tallies as the contract counts them: inFavor includes the
+            # support carried from pre-voting (fromPreVote), voters counts
+            # only the voting phase and supporters every address that
+            # pre-voted or voted the proposal in this round.
             "vote": {
-                "inFavor": vt["inFavor"] if vt else "0",
-                "against": vt["against"] if vt else "0",
-                "total": vt["total"] if vt else "0",
+                "inFavor": str(in_favor),
+                "against": str(against),
+                "total": str(in_favor + against),
+                "fromPreVote": str(from_pre_vote),
                 "voters": vt["voters"] if vt else 0,
+                "supporters": len(supporters),
             },
             "voteStep": {**_tx(vs), "result": vs.get("result"),
                          "resultLabel": VOTE_RESULTS.get(vs.get("result"))}
@@ -359,6 +382,38 @@ async def user_participation(db, user):
         entry["voteInFavor"] = wei_str(row["inFavor"])
         entry["voteAgainst"] = wei_str(row["against"])
     return out
+
+
+async def latest_changer_records(db, addresses):
+    """Lowercase changer -> its newest (proposal, round) record: the latest
+    attempt of each changer in the VotingMachine."""
+    latest = {}
+    for rec in await build_proposal_records(db, proposals=addresses):
+        prev = latest.get(rec["proposal"])
+        if prev is None or rec["round"] > prev["round"]:
+            latest[rec["proposal"]] = rec
+    return latest
+
+
+async def changer_executions(db, addresses):
+    """Lowercase changer -> {"hash", "createdAt"} of the acceptedStep() that
+    executed it successfully, from the indexed AcceptedStepEvents."""
+    addresses = [a.lower() for a in addresses]
+    if not addresses:
+        return {}
+    out = {}
+    cursor = db[ACCEPTED_STEP].find(
+        {"proposal": {"$in": addresses}, "success": True})
+    async for doc in cursor:
+        prev = out.get(doc["proposal"])
+        if prev is None or _event_order(doc) < prev["order"]:
+            out[doc["proposal"]] = {
+                "hash": doc.get("hash"),
+                "createdAt": mongo_date_to_str(doc.get("createdAt")),
+                "order": _event_order(doc),
+            }
+    return {k: {"hash": v["hash"], "createdAt": v["createdAt"]}
+            for k, v in out.items()}
 
 
 async def voting_stats(db):

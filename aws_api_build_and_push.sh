@@ -54,6 +54,9 @@ echo "Build done!"
 
 docker tag "stable-protocol-api-v2_$ENV:latest" "$AWS_ID.dkr.ecr.$AWS_REGION.amazonaws.com/stable-protocol-api-v2_$ENV:latest"
 
+# ECR login tokens expire after 12 hours: log in right before pushing
+aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$AWS_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+
 docker push "$AWS_ID.dkr.ecr.$AWS_REGION.amazonaws.com/stable-protocol-api-v2_$ENV:latest"
 
 echo "finish done!"

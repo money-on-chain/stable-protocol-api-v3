@@ -15,9 +15,16 @@ The registry and documents are fetched from the repo (raw.githubusercontent.com
 by default) and cached in-process - the API's mongo user may be read-only. On a
 failed refresh the last good copy keeps being served.
 
+Until the VotingMachine emits its voting events on a network (on mainnet, from
+MIP#263501 on), the indexed history is empty there and the registry's MIPs with
+a changer on the API's network are the list of proposals to show.
+
 Env:
   GOVERNANCE_REGISTRY_URL  url of proposals.json (empty disables the registry).
                            Documents and images are resolved relative to it.
+  GOVERNANCE_NETWORK       network this API serves, as named in the registry
+                           (rskMainnet / rskTestnet): MIPs are listed only when
+                           they have a changer there. Empty lists every MIP.
 """
 
 import asyncio
@@ -38,6 +45,11 @@ REGISTRY_URL = getenv(
     default="https://raw.githubusercontent.com/money-on-chain/proposals-changers/"
             "proposals_registry/docs/proposals/proposals.json")
 
+NETWORKS = ("rskMainnet", "rskTestnet")
+NETWORK = getenv("GOVERNANCE_NETWORK", default="") or None
+if NETWORK is not None and NETWORK not in NETWORKS:
+    raise ValueError(f"GOVERNANCE_NETWORK must be one of {', '.join(NETWORKS)}")
+
 TTL = 300
 MAX_REGISTRY_BYTES = 1024 * 1024
 MAX_DOCUMENT_BYTES = 1024 * 1024
@@ -46,6 +58,7 @@ REQUEST_TIMEOUT = 8
 _RAW_GITHUB = re.compile(
     r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/(.+)$")
 _ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _MIP = re.compile(r"^(?:MIP#?)?(\d{6})$", re.IGNORECASE)
 # ![alt](target "title") and [text](target), not inside code spans
 _IMAGE = re.compile(r"(!\[[^\]]*\]\()\s*<?([^)\s>]+)>?((?:\s+\"[^\"]*\")?\s*\))")
@@ -65,6 +78,67 @@ def normalize_mip(value):
     """'MIP#263101', 'MIP263101' or '263101' -> 'MIP#263101' (None if not a MIP)."""
     match = _MIP.match(value or "")
     return f"MIP#{match.group(1)}" if match else None
+
+
+def on_network(entry, network):
+    """The entry with only its changers on `network`, or None when it has
+    none there. A falsy `network` keeps every entry and changer."""
+    if not network:
+        return entry
+    changers = [c for c in entry["changers"] if c["network"] == network]
+    return {**entry, "changers": changers} if changers else None
+
+
+def with_execution(entry, chain_executions, latest_records=None):
+    """The entry with its execution and voting outcome on the network.
+
+    `executed`, `executedTx`, `executedAt`: whether one of its changers was
+    executed, from the indexed AcceptedStepEvents (`chain_executions`:
+    lowercase changer -> {"hash", "createdAt"}) or else the registry's
+    executedTx. The mainnet VotingMachine emits no events until MIP#263501, so
+    there the registry is the only record.
+
+    `outcome`, `outcomeRound`: the voting status of the MIP's latest attempt,
+    the newest indexed record among its changers (`latest_records`: lowercase
+    changer -> record, see voting.latest_changer_records). Same values as the
+    records' status (PreVoting, Voting, Accepted, NoQuorum, Vetoed - rejected
+    by votes against or the collateral veto -, NotSelected, Unregistered,
+    Executed, ExecutionFailed). "Executed" with no round when only the
+    registry knows it; None when nothing is known. A PreVoting outcome may
+    have expired: the events don't carry the pre-vote expiration, so clients
+    tell it from the live contract state."""
+    out = {**entry, "executed": False, "executedTx": None,
+           "executedAt": None, "outcome": None, "outcomeRound": None}
+    for changer in entry["changers"]:
+        found = chain_executions.get(changer["address"].lower())
+        if found:
+            out.update(executed=True, executedTx=found["hash"],
+                       executedAt=found["createdAt"])
+            break
+    else:
+        for changer in entry["changers"]:
+            if changer.get("executedTx"):
+                out.update(executed=True, executedTx=changer["executedTx"])
+                break
+
+    latest = None
+    for changer in entry["changers"]:
+        rec = (latest_records or {}).get(changer["address"].lower())
+        if rec and (latest is None or rec["round"] > latest["round"]):
+            latest = rec
+    if latest is not None:
+        out.update(outcome=latest["status"], outcomeRound=latest["round"])
+    elif out["executed"]:
+        out["outcome"] = "Executed"
+    return out
+
+
+def listable(entry, network):
+    """The entry as the mips endpoints serve it: drafts are not shown, and
+    only MIPs with a changer on `network` (see on_network)."""
+    if entry.get("status") == "Draft":
+        return None
+    return on_network(entry, network)
 
 
 def _html_url(raw_url):
@@ -109,15 +183,29 @@ def _entry(raw):
     changers = []
     for changer in raw.get("changers") or []:
         if isinstance(changer, dict) and _ADDRESS.match(str(changer.get("address"))):
+            submitter = changer.get("submitter")
+            executed_tx = changer.get("executedTx")
             changers.append({
                 "network": changer.get("network"),
                 "name": changer.get("name"),
                 "address": changer["address"],
+                # First preVote() sender; None until submitted
+                "submitter": submitter
+                if _ADDRESS.match(str(submitter)) else None,
+                # acceptedStep() transaction that executed it; None until
+                # executed or when only the indexed events record it
+                "executedTx": executed_tx
+                if _TX_HASH.match(str(executed_tx)) else None,
             })
     document_url = urljoin(REGISTRY_URL, file)
+    tags = raw.get("tags")
     return {
         "mip": mip,
         "title": raw.get("title"),
+        # Projects the MIP changes (doc, usdrif, oracles, ...); the registry's
+        # validator owns the vocabulary
+        "tags": [t for t in tags if isinstance(t, str)]
+        if isinstance(tags, list) else [],
         "status": raw.get("status"),
         "date": raw.get("date"),
         "summary": raw.get("summary"),

@@ -57,6 +57,16 @@ ProposerQuery = Annotated[Optional[str], Query(
     title="Proposer address",
     description="Optional filter by the address that submitted the proposal",
     pattern=ADDRESS_PATTERN)]
+TagQuery = Annotated[Optional[str], Query(
+    title="Tag",
+    description="Optional filter: MIPs tagged with this project "
+                "(doc, usdrif, oracles, voting, staking)",
+    pattern="^[a-z0-9-]{1,32}$")]
+NetworkQuery = Annotated[Optional[str], Query(
+    title="Network",
+    description="Overrides the API's network (GOVERNANCE_NETWORK): " +
+                ", ".join(registry.NETWORKS),
+    pattern="^(" + "|".join(registry.NETWORKS) + ")$")]
 ListedQuery = Annotated[Optional[bool], Query(
     title="Listed",
     description="Optional filter: true for proposals in the proposal registry, "
@@ -81,6 +91,23 @@ async def require_registry():
     if value is None:
         raise HTTPException(status_code=404, detail="Proposal registry disabled")
     return value
+
+
+async def with_executions(entries):
+    """The entries with their execution and voting outcome
+    (registry.with_execution): the indexed AcceptedStepEvents and latest
+    records of all their changers. Without DB only the registry's executedTx
+    is used."""
+    executions, latest = {}, {}
+    try:
+        db = await get_db()
+        if db is not None:
+            addresses = [c["address"] for e in entries for c in e["changers"]]
+            executions = await voting.changer_executions(db, addresses)
+            latest = await voting.latest_changer_records(db, addresses)
+    except Exception as e:
+        log.warning(f"Serving MIPs without indexed voting data: {e}")
+    return [registry.with_execution(e, executions, latest) for e in entries]
 
 
 async def mip_content(entry):
@@ -172,12 +199,23 @@ async def voting_proposal_content(address: ProposalPath):
     response_description="Returns the proposal registry, newest MIP first",
     response_model=MipEntryList,
 )
-async def voting_mips(limit: LimitQuery = 100, skip: SkipQuery = 0):
-    """Returns the MIPs of the proposal registry, including drafts and MIPs
-    without a changer, with their changer addresses per network."""
+async def voting_mips(
+        network: NetworkQuery = None,
+        tag: TagQuery = None,
+        limit: LimitQuery = 100,
+        skip: SkipQuery = 0):
+    """Returns the MIPs of the proposal registry that have a changer on the
+    API's network (GOVERNANCE_NETWORK, or `network`), with only that network's
+    changers. Drafts are not listed; `tag` keeps the MIPs tagged with it. Lists every non-draft MIP when no network
+    is configured."""
     entries = await require_registry()
-    results = sorted(entries["byMip"].values(), key=lambda e: e["mip"], reverse=True)
-    page = results[skip:skip + limit]
+    network = network or registry.NETWORK
+    results = [e for e in (registry.listable(e, network)
+                           for e in entries["byMip"].values()) if e]
+    if tag:
+        results = [e for e in results if tag in e["tags"]]
+    results.sort(key=lambda e: e["mip"], reverse=True)
+    page = await with_executions(results[skip:skip + limit])
     return {"results": page, "count": len(page), "total": len(results)}
 
 
@@ -186,13 +224,18 @@ async def voting_mips(limit: LimitQuery = 100, skip: SkipQuery = 0):
     response_description="Returns a MIP's registry entry and document",
     response_model=MipContent,
 )
-async def voting_mip(mip: MipPath):
+async def voting_mip(mip: MipPath, network: NetworkQuery = None):
     """Returns a MIP's registry entry and markdown document, like
-    /proposals/{address}/content/ but looked up by MIP number."""
+    /proposals/{address}/content/ but looked up by MIP number. 404 for a
+    draft, or when the MIP has no changer on the API's network
+    (GOVERNANCE_NETWORK, or `network`)."""
     entries = await require_registry()
     entry = entries["byMip"].get(registry.normalize_mip(mip))
+    if entry is not None:
+        entry = registry.listable(entry, network or registry.NETWORK)
     if entry is None:
         raise HTTPException(status_code=404, detail="Not found")
+    [entry] = await with_executions([entry])
     return await mip_content(entry)
 
 
