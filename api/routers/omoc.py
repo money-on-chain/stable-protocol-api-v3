@@ -15,6 +15,7 @@ from api.models.omoc import DATE_FIELDS, \
     SupportersPayEarningsList, \
     SupportersWithdrawList, \
     SupportersWithdrawStakeList, \
+    StakingOperationList, \
     VotingMachineVoteEventList, \
     VotingMachinePreVoteEventList, \
     VotingMachinePreVoteStepEventList, \
@@ -39,6 +40,17 @@ from api.utils import fields_date_to_str
 
 collation = Collation(locale="en", strength=2)
 router = APIRouter()
+
+# `omoc_operations` rows that make up a user's staking history, grouped by the
+# field holding the end user's address: Supporters_* are emitted with the
+# StakingMachine as `user` and the staker as `subaccount`; DelayMachine_* with
+# the StakingMachine as `source` and the staker as `destination`.
+STAKING_SUPPORTERS_OPERATIONS = ["Supporters_AddStake", "Supporters_WithdrawStake"]
+STAKING_DELAY_MACHINE_OPERATIONS = [
+    "DelayMachine_PaymentDeposit",
+    "DelayMachine_PaymentCancel",
+    "DelayMachine_PaymentWithdraw",
+]
 
 
 @router.get(
@@ -589,6 +601,76 @@ async def supporters_withdraw_stake(
         .to_list(limit)
 
     rows_count = await db["event_Supporters_WithdrawStake"].estimated_document_count()
+
+    for trx in rows:
+        trx['_id'] = str(trx['_id'])
+        fields_date_to_str(trx, DATE_FIELDS)
+
+    # Last block indexed
+    indexer = await db["moc_indexer"] \
+        .find_one(sort=[("updatedAt", -1)])
+
+    last_block_indexed = 0
+    if indexer:
+        if 'last_raw_tx_block' in indexer:
+            last_block_indexed = indexer['last_raw_tx_block']
+
+    dict_values = {
+        "results": rows,
+        "count": len(rows),
+        "total": rows_count,
+        "last_block_indexed": last_block_indexed
+    }
+
+    return dict_values
+
+
+@router.get(
+    "/v1/omoc/staking_operations/",
+    tags=["omoc"],
+    response_description="Returns the staking operations of an address",
+    response_model=StakingOperationList
+)
+async def staking_operations(
+        address: Annotated[str, Query(
+            title="Staker address",
+            description="Address that staked: the user's wallet, or its vesting "
+                        "contract for vesting holders",
+            pattern='^0x[a-fA-F0-9]{40}$')],
+        limit: Annotated[int, Query(
+            title="Limit",
+            description="Limit",
+            le=100)] = 20,
+        skip: Annotated[int, Query(
+            title="Skip",
+            description="Skip",
+            le=1000)] = 0):
+    """Returns the staking history (stake, unstake, cancel and withdraw of a
+    pending withdrawal) of the given address, newest first. A single user
+    action can emit more than one row with the same hash (e.g. unstake =
+    Supporters_WithdrawStake + DelayMachine_PaymentDeposit)."""
+
+    # get mongo db connection
+    db = await get_db()
+
+    if db is None:
+        raise HTTPException(status_code=400, detail="Cannot get DB")
+
+    query_filter = {"$or": [
+        {"operation": {"$in": STAKING_SUPPORTERS_OPERATIONS},
+         "subaccount": address},
+        {"operation": {"$in": STAKING_DELAY_MACHINE_OPERATIONS},
+         "destination": address},
+    ]}
+
+    rows = await db["omoc_operations"]\
+        .find(query_filter, collation=collation)\
+        .sort("createdAt", -1)\
+        .skip(skip)\
+        .limit(limit)\
+        .to_list(limit)
+
+    rows_count = await db["omoc_operations"].count_documents(query_filter, collation=collation)
 
     for trx in rows:
         trx['_id'] = str(trx['_id'])
