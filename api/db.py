@@ -1,3 +1,4 @@
+import re
 from os import getenv
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from dotenv import load_dotenv
@@ -7,6 +8,15 @@ from api.logger import log
 load_dotenv()
 
 db_client: AsyncIOMotorClient = None
+
+# Upper bound for every operation (pymongo client-side operation timeout,
+# also sent to the server as maxTimeMS), so an expensive public query can't
+# keep the DB busy indefinitely. Keep it below nginx's proxy_read_timeout.
+MONGO_TIMEOUT_MS = int(getenv("APP_MONGO_TIMEOUT_MS", default="20000"))
+
+
+def _mask_mongo_uri(uri: str) -> str:
+    return re.sub(r"://[^@/]+@", "://***:***@", uri)
 
 
 async def get_db() -> AsyncIOMotorClient:
@@ -23,10 +33,16 @@ async def connect_and_init_db():
     if not mongo_uri or mongo_uri == "SET_VIA_APP_MONGO_URI_ENV":
         raise RuntimeError("APP_MONGO_URI environment variable is not set")
     try:
-        db_client = AsyncIOMotorClient(mongo_uri)
-        log.info('Connected to mongo.')
+        db_client = AsyncIOMotorClient(mongo_uri, timeoutMS=MONGO_TIMEOUT_MS)
+        # Fail at startup, not on every request, when the server is
+        # unreachable or its version unsupported by this pymongo
+        server_info = await db_client.server_info()
+        log.info(f"Connected to mongo! (version {server_info['version']}).")
     except Exception as e:
-        log.exception(f'Could not connect to mongo: {e}')
+        log.error(
+            f"Could not connect to mongo at {_mask_mongo_uri(mongo_uri)}: "
+            f"{type(e).__name__}: {_mask_mongo_uri(str(e))}"
+        )
         raise
 
 

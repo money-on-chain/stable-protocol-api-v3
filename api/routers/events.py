@@ -22,11 +22,11 @@ async def event_moc_settlement_executed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()
@@ -77,11 +77,11 @@ async def moc_success_fee_distributed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()
@@ -132,11 +132,11 @@ async def moc_tc_interest_payment(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()
@@ -187,11 +187,11 @@ async def moc_tp_ema_updated(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()
@@ -242,11 +242,11 @@ async def moc_queue_operation_error(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()
@@ -297,11 +297,11 @@ async def moc_queue_operation_executed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()
@@ -352,11 +352,11 @@ async def moc_queue_operation_queued(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=10000)] = 2000,
+            ge=1, le=10000)] = 2000,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
     # get mongo db connection
     db = await get_db()

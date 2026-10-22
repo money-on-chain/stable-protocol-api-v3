@@ -31,11 +31,11 @@ async def operations_list(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=1000)] = 20,
+            ge=1, le=1000)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=10000)] = 0
+            ge=0, le=10000)] = 0
 ):
 
     # get mongo db connection
