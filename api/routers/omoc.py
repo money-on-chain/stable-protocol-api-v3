@@ -67,11 +67,11 @@ async def vesting_created(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 50,
+            ge=1, le=100)] = 50,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -129,11 +129,11 @@ async def claim_ok(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -187,11 +187,11 @@ async def delay_machine_payment_cancel(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -243,11 +243,11 @@ async def delay_machine_payment_deposit(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -299,11 +299,11 @@ async def delay_machine_payment_withdraw(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -355,11 +355,11 @@ async def supporters_add_stake(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -411,11 +411,11 @@ async def supporters_cancel_earnings(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -467,11 +467,11 @@ async def supporters_pay_earnings(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -523,11 +523,11 @@ async def supporters_withdraw(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -579,11 +579,11 @@ async def supporters_withdraw_stake(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -640,11 +640,11 @@ async def staking_operations(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
     """Returns the staking history (stake, unstake, cancel and withdraw of a
     pending withdrawal) of the given address, newest first. A single user
     action can emit more than one row with the same hash (e.g. unstake =
@@ -705,11 +705,11 @@ async def voting_machine_vote_event(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -761,11 +761,11 @@ async def voting_machine_pre_vote_event(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -817,11 +817,11 @@ async def voting_machine_pre_vote_step_event(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -873,11 +873,11 @@ async def voting_machine_vote_step_event(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -929,11 +929,11 @@ async def voting_machine_accepted_step_event(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -985,11 +985,11 @@ async def voting_machine_unregister_event(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1041,11 +1041,11 @@ async def oracle_manager_oracle_registered(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1097,11 +1097,11 @@ async def oracle_manager_oracle_stake_added(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1153,11 +1153,11 @@ async def oracle_manager_oracle_subscribed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1209,11 +1209,11 @@ async def oracle_manager_oracle_unsubscribed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1265,11 +1265,11 @@ async def oracle_manager_oracle_removed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1321,11 +1321,11 @@ async def coin_pair_price_price_published(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1377,11 +1377,11 @@ async def coin_pair_price_emergency_price_published(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1433,11 +1433,11 @@ async def coin_pair_price_forced_price_query_mode_set(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1489,11 +1489,11 @@ async def coin_pair_price_oracle_reward_transfer(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1545,11 +1545,11 @@ async def coin_pair_price_new_round(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1601,11 +1601,11 @@ async def coin_pair_price_oracle_auto_unsubscribed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1657,11 +1657,11 @@ async def tasks_runner_task_executed(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()
@@ -1713,11 +1713,11 @@ async def task_trigger_order_trigger_orders_reverted(
         limit: Annotated[int, Query(
             title="Limit",
             description="Limit",
-            le=100)] = 20,
+            ge=1, le=100)] = 20,
         skip: Annotated[int, Query(
             title="Skip",
             description="Skip",
-            le=1000)] = 0):
+            ge=0, le=1000)] = 0):
 
     # get mongo db connection
     db = await get_db()

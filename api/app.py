@@ -2,9 +2,13 @@ import json
 from contextlib import asynccontextmanager
 from os import getenv
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+from pymongo.errors import ExecutionTimeout, NetworkTimeout
+from pymongo.errors import ServerSelectionTimeoutError as MongoTimeout
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.routers import operations
 from api.routers import events
@@ -22,7 +26,7 @@ async def lifespan(app: FastAPI):
     await close_db_connect()
 
 
-API_VERSION = '1.2.11'
+API_VERSION = '1.2.12'
 API_TITLE = 'Stable Protocol API v3'
 API_DESCRIPTION = """
 This is a requirement for [stable-protocol-interface-v2](https://github.com/money-on-chain/stable-protocol-interface-v3)
@@ -61,9 +65,50 @@ app.include_router(voting.router)
 app.include_router(lending.router)
 
 
+@app.exception_handler(MongoTimeout)
+async def db_error_exception_handler(request: Request, exc: MongoTimeout):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Cannot get DB access"},
+    )
+
+
+@app.exception_handler(ExecutionTimeout)
+@app.exception_handler(NetworkTimeout)
+async def db_query_timeout_exception_handler(request: Request, exc):
+    # A query that ran past APP_MONGO_TIMEOUT_MS
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database query timed out"},
+    )
+
+
+class HostValidationExemptMiddleware:
+    """Applies TrustedHostMiddleware to every path except `exempt_paths`.
+
+    ALB/ECS target-group health checks hit the task by private IP and
+    cannot be configured to send a matching Host header, so `/ping` must
+    stay reachable regardless of Host or the task gets marked unhealthy
+    and killed even though the app itself is fine.
+    """
+
+    def __init__(self, app: ASGIApp, allowed_hosts, exempt_paths=("/ping",)):
+        self.app = app
+        self.exempt_paths = set(exempt_paths)
+        self.trusted_host_app = TrustedHostMiddleware(
+            app, allowed_hosts=allowed_hosts)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] == "http" and scope["path"] in self.exempt_paths:
+            await self.app(scope, receive, send)
+        else:
+            await self.trusted_host_app(scope, receive, send)
+
+
 if ALLOWED_HOSTS:
     # Guards against HTTP Host Header attacks
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+    app.add_middleware(HostValidationExemptMiddleware,
+                       allowed_hosts=ALLOWED_HOSTS)
 
 
 log.info("Starting webservice API version: {0}".format(API_VERSION))

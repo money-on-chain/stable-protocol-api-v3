@@ -13,7 +13,7 @@ API list operations of the users dapp. This is a requirement for [stable-protoco
 
 Requirements:
 
-* Python 3.9+
+* Python 3.11+ (the Docker image uses 3.12)
 * Mongo DB installed also DB, User & pass created
 * [Stable-protocol-indexer-v2](https://github.com/money-on-chain/stable-protocol-indexer-v2)Protocol Indexer installed & Running in the same Mongo DB
 
@@ -61,9 +61,13 @@ docker run -d \
 --env APP_MONGO_URI=mongodb://localhost:27017 \
 --env APP_MONGO_DB=roc_mainnet \
 --env BACKEND_CORS_ORIGINS=["*"] \
---env ALLOWED_HOSTS=["*"] \
+--env ALLOWED_HOSTS='["api-v2.rifonchain.com"]' \
 stable_protocol_api_v2
 ```
+
+`ALLOWED_HOSTS` is the `Host` header this backend accepts: set it to the API's own hostname(s) for that environment, never `["*"]` (which disables the check). `/ping` is exempt, so ALB health checks by private IP keep working.
+
+`APP_MONGO_TIMEOUT_MS` (default `20000`) caps every database operation; a query that runs longer returns 503. Keep it below nginx's `proxy_read_timeout` (60s).
 
 The `/v1/omoc/voting/` endpoints serve the OMoC proposal history from the indexed VotingMachine events, matched by changer address to the MIP documents of the proposal registry ([money-on-chain/proposals-changers](https://github.com/money-on-chain/proposals-changers), `docs/proposals/proposals.json`). The registry and its documents are cached in memory for 5 minutes, and the last good copy is kept if a refresh fails.
 
