@@ -12,6 +12,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.routers import operations
 from api.routers import events
+from api.routers import webapp
+from api.routers import stats
 from api.routers import omoc
 from api.routers import voting
 from api.routers import lending
@@ -26,7 +28,7 @@ async def lifespan(app: FastAPI):
     await close_db_connect()
 
 
-API_VERSION = '1.2.13'
+API_VERSION = '1.3.0'
 API_TITLE = 'Stable Protocol API v3'
 API_DESCRIPTION = """
 This is a requirement for [stable-protocol-interface-v2](https://github.com/money-on-chain/stable-protocol-interface-v3)
@@ -36,10 +38,28 @@ ___
 # Set to a falsy value (false/0/no) to disable Swagger/ReDoc in production
 DOCS_ENABLED = getenv("DOCS_ENABLED", "true").lower() not in ("false", "0", "no")
 
+# Stable protocol version of the deployment's database: each indexer writes
+# its own collections, so only the matching routers are served.
+#   "1": MoC v1, stable-protocol-indexer (`Transaction`)
+#   "2": MoC v2 (RoC, Flipmoney...), stable-protocol-indexer-v3
+#        (`operations`, `event_Moc*`)
+# The OMoC, voting and lending routers are served by both.
+PROTOCOL_VERSION = getenv("PROTOCOL_VERSION", default="2")
+PROTOCOL_ROUTERS = {
+    "1": [webapp, stats],
+    "2": [operations, events],
+}
+if PROTOCOL_VERSION not in PROTOCOL_ROUTERS:
+    raise RuntimeError(
+        f"PROTOCOL_VERSION must be one of {sorted(PROTOCOL_ROUTERS)}, "
+        f"not {PROTOCOL_VERSION!r}")
+
 tags_metadata = [{
     "name": "Webapp",
     "description": "Mainly used from the webapp"}]
 
+if PROTOCOL_VERSION == "1":
+    tags_metadata += stats.tags_metadata
 tags_metadata += lending.tags_metadata
 tags_metadata += omoc.tags_metadata
 tags_metadata += voting.tags_metadata
@@ -65,8 +85,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(operations.router)
-app.include_router(events.router)
+for module in PROTOCOL_ROUTERS[PROTOCOL_VERSION]:
+    app.include_router(module.router)
 app.include_router(omoc.router)
 app.include_router(voting.router)
 app.include_router(lending.router)
@@ -111,6 +131,38 @@ class HostValidationExemptMiddleware:
         else:
             await self.trusted_host_app(scope, receive, send)
 
+
+class LegacyPrefixMiddleware:
+    """Serves `/api/v1/...` as `/v1/...`, marked with a `Deprecation`
+    header: the paths of the MoC v1 API (stable-protocol-api), which the
+    old dapp and stable-protocol-interface-v3's MoC v1 build still call."""
+
+    LEGACY = "/api/v1/"
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http" or not scope["path"].startswith(self.LEGACY):
+            await self.app(scope, receive, send)
+            return
+
+        scope = {**scope, "path": "/v1/" + scope["path"][len(self.LEGACY):]}
+        raw_path = scope.get("raw_path")
+        if raw_path and raw_path.startswith(self.LEGACY.encode()):
+            scope["raw_path"] = b"/v1/" + raw_path[len(self.LEGACY):]
+
+        async def send_deprecated(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [
+                    *message.get("headers", []), (b"deprecation", b"true")]}
+            await send(message)
+
+        await self.app(scope, receive, send_deprecated)
+
+
+if PROTOCOL_VERSION == "1":
+    app.add_middleware(LegacyPrefixMiddleware)
 
 if ALLOWED_HOSTS:
     # Guards against HTTP Host Header attacks

@@ -7,7 +7,7 @@ while getopts ":e:i:r:" o; do
     case "${o}" in
         e)
             e=${OPTARG}
-            ((  e=="flipago_testnet" || e=="flipago_mainnet" || e == "roc_testnet" || e == "roc_mainnet" || e == "stablex_testnet")) || usage
+            ((  e=="flipago_testnet" || e=="flipago_mainnet" || e == "roc_testnet" || e == "roc_mainnet" || e == "stablex_testnet" || e == "moc_testnet" || e == "moc_mainnet")) || usage
             case $e in
                 flipago_testnet)
                     ENV=$e
@@ -22,6 +22,12 @@ while getopts ":e:i:r:" o; do
                     ENV=$e
                     ;;
                 stablex_testnet)
+                    ENV=$e
+                    ;;
+                moc_testnet)
+                    ENV=$e
+                    ;;
+                moc_mainnet)
                     ENV=$e
                     ;;
                 *)

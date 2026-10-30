@@ -10,6 +10,7 @@ pydantic==2.14.1
 pymongo==4.10.1
 uvicorn==0.54.0
 python-dotenv==1.2.4
+tabulate==0.10.0
 httpx==0.28.1
 # The registry client verifies TLS against the system store (see
 # Dockerfile.api); certifi is kept at a release that at least drops the root

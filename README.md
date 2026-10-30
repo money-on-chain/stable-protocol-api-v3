@@ -44,6 +44,8 @@ Go to http://localhost:8000/
 | Mainnet       | Flipmoney | https://api-v2.flipmoney.io/           |
 | Testnet       | ROC       | https://api-v2-testnet.rifonchain.com/ |
 | Mainnet       | ROC       | https://api-v2.rifonchain.com/         |
+| Testnet       | MOC (v1)  | https://api-operations-testnet.moneyonchain.com/ |
+| Mainnet       | MOC (v1)  | https://api-operations.moneyonchain.com/ |
 
 ### Docker (Recommended)
 
@@ -64,6 +66,11 @@ docker run -d \
 --env ALLOWED_HOSTS='["api-v2.rifonchain.com"]' \
 stable_protocol_api_v2
 ```
+
+`PROTOCOL_VERSION` (default `2`) is the stable protocol of the deployment's database, which picks the routers served besides OMoC, voting and lending (served by both):
+
+- `2` — MoC v2 deployments (RoC, Flipmoney...), indexed by stable-protocol-indexer-v3: `/v1/operations/` and `/v1/events/`.
+- `1` — MoC v1, indexed by stable-protocol-indexer: `/v1/webapp/transactions/list/` and `/v1/stats/`, which replace the stable-protocol-api service. `VENDOR_ADDRESS` and `COMMISSION_SPLITTER_V2` are excluded from the transactions list. The old `/api/v1/...` paths keep working as aliases of `/v1/...`, with a `Deprecation: true` response header.
 
 `ALLOWED_HOSTS` is the `Host` header this backend accepts: set it to the API's own hostname(s) for that environment, never `["*"]` (which disables the check). `/ping` is exempt, so ALB health checks by private IP keep working.
 
