@@ -17,6 +17,7 @@ from api.routers import stats
 from api.routers import omoc
 from api.routers import voting
 from api.routers import lending
+from api.routers import incentives
 from api.models.base import InfoApi
 from api.logger import log
 from api.db import connect_and_init_db, close_db_connect
@@ -40,13 +41,14 @@ DOCS_ENABLED = getenv("DOCS_ENABLED", "true").lower() not in ("false", "0", "no"
 
 # Stable protocol version of the deployment's database: each indexer writes
 # its own collections, so only the matching routers are served.
-#   "1": MoC v1, stable-protocol-indexer (`Transaction`)
+#   "1": MoC v1, stable-protocol-indexer (`Transaction`) and MoC_Incentive
+#        (`mocin_*`)
 #   "2": MoC v2 (RoC, Flipmoney...), stable-protocol-indexer-v3
 #        (`operations`, `event_Moc*`)
 # The OMoC, voting and lending routers are served by both.
 PROTOCOL_VERSION = getenv("PROTOCOL_VERSION", default="2")
 PROTOCOL_ROUTERS = {
-    "1": [webapp, stats],
+    "1": [webapp, stats, incentives],
     "2": [operations, events],
 }
 if PROTOCOL_VERSION not in PROTOCOL_ROUTERS:
@@ -60,6 +62,7 @@ tags_metadata = [{
 
 if PROTOCOL_VERSION == "1":
     tags_metadata += stats.tags_metadata
+    tags_metadata += incentives.tags_metadata
 tags_metadata += lending.tags_metadata
 tags_metadata += omoc.tags_metadata
 tags_metadata += voting.tags_metadata
@@ -133,24 +136,47 @@ class HostValidationExemptMiddleware:
 
 
 class LegacyPrefixMiddleware:
-    """Serves `/api/v1/...` as `/v1/...`, marked with a `Deprecation`
-    header: the paths of the MoC v1 API (stable-protocol-api), which the
-    old dapp and stable-protocol-interface-v3's MoC v1 build still call."""
+    """Serves the paths of the services this API replaced, which the old
+    dapp and stable-protocol-interface-v3's MoC v1 build still call, at
+    their current paths, marked with a `Deprecation` header:
 
-    LEGACY = "/api/v1/"
+    - `/api/v1/...` as `/v1/...`: the MoC v1 API (stable-protocol-api).
+    - `/balance/...`, `/claims/...` and `/agent` as `/v1/incentives/...`:
+      MoC_Incentive's miniwebservice (moc-incentives.moneyonchain.com).
+    """
+
+    # (legacy, current): path prefixes, or whole paths when not ending in "/"
+    LEGACY = [
+        ("/api/v1/", "/v1/"),
+        ("/balance/", "/v1/incentives/balance/"),
+        ("/claims/", "/v1/incentives/claims/"),
+        ("/agent/", "/v1/incentives/agent/"),
+        ("/agent", "/v1/incentives/agent/"),
+    ]
 
     def __init__(self, app: ASGIApp):
         self.app = app
 
+    @classmethod
+    def _current(cls, path):
+        for legacy, current in cls.LEGACY:
+            if legacy.endswith("/") and path.startswith(legacy):
+                return legacy, current
+            if path == legacy:
+                return legacy, current
+        return None
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
-        if scope["type"] != "http" or not scope["path"].startswith(self.LEGACY):
+        found = self._current(scope["path"]) if scope["type"] == "http" else None
+        if found is None:
             await self.app(scope, receive, send)
             return
 
-        scope = {**scope, "path": "/v1/" + scope["path"][len(self.LEGACY):]}
+        legacy, current = found
+        scope = {**scope, "path": current + scope["path"][len(legacy):]}
         raw_path = scope.get("raw_path")
-        if raw_path and raw_path.startswith(self.LEGACY.encode()):
-            scope["raw_path"] = b"/v1/" + raw_path[len(self.LEGACY):]
+        if raw_path and raw_path.startswith(legacy.encode()):
+            scope["raw_path"] = current.encode() + raw_path[len(legacy):]
 
         async def send_deprecated(message):
             if message["type"] == "http.response.start":

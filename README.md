@@ -71,6 +71,7 @@ stable_protocol_api_v2
 
 - `2` — MoC v2 deployments (RoC, Flipmoney...), indexed by stable-protocol-indexer-v3: `/v1/operations/` and `/v1/events/`.
 - `1` — MoC v1, indexed by stable-protocol-indexer: `/v1/webapp/transactions/list/` and `/v1/stats/`, which replace the stable-protocol-api service. `VENDOR_ADDRESS` and `COMMISSION_SPLITTER_V2` are excluded from the transactions list. The old `/api/v1/...` paths keep working as aliases of `/v1/...`, with a `Deprecation: true` response header.
+- Also with `1`, `/v1/incentives/` (`balance/{address}`, `claims/{address}`, `agent/`) serves the MoC Liquidity Mining rewards of MoC_Incentive, replacing its miniwebservice (moc-incentives.moneyonchain.com), whose `/balance/...`, `/claims/...` and `/agent` paths keep working as aliases. The `mocin_*` collections are read from `APP_MONGO_DB`, or from `INCENTIVES_MONGO_DB` on the same server when set.
 
 `ALLOWED_HOSTS` is the `Host` header this backend accepts: set it to the API's own hostname(s) for that environment, never `["*"]` (which disables the check). `/ping` is exempt, so ALB health checks by private IP keep working.
 

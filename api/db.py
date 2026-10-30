@@ -34,6 +34,17 @@ async def get_db() -> AsyncIOMotorClient:
     return db_client[db_name]
 
 
+async def get_incentives_db() -> AsyncIOMotorDatabase:
+    """The MoC Liquidity Mining incentives database (MoC_Incentive's
+    `mocin_*` collections): APP_MONGO_DB, unless INCENTIVES_MONGO_DB names
+    another database on the same server."""
+    db_name = getenv("INCENTIVES_MONGO_DB") or getenv("APP_MONGO_DB", default="example")
+    if db_client is None:
+        log.warning('Connection is None, nothing to get.')
+        return
+    return db_client[db_name]
+
+
 async def connect_and_init_db():
     global db_client
     mongo_uri = getenv("APP_MONGO_URI")
