@@ -23,7 +23,11 @@ from api.utils import fields_date_to_str
 EXAMPLE_ADDRESS = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3'
 ADDRESS_PATTERN = '^0x[a-fA-F0-9]{40}$'
 
-router = APIRouter()
+tags_metadata = [{
+    "name": "Lending",
+    "description": "Events and unified activity feed for the Lending protocol"}]
+
+router = APIRouter(tags=["Lending"])
 
 
 async def _get_last_block_indexed(db) -> int:
@@ -36,7 +40,7 @@ async def _get_last_block_indexed(db) -> int:
 async def _query_collection(db, collection_name: str, query_filter: dict, limit: int, skip: int) -> dict:
     rows = await db[collection_name] \
         .find(query_filter) \
-        .sort("blockNumber", -1) \
+        .sort([("blockNumber", -1), ("_id", -1)]) \
         .skip(skip) \
         .limit(limit) \
         .to_list(limit)
@@ -59,7 +63,6 @@ async def _query_collection(db, collection_name: str, query_filter: dict, limit:
 
 @router.get(
     "/v1/lending/deposits/",
-    tags=["lending"],
     response_description="Lending Deposit events",
     response_model=EventLendingDepositList
 )
@@ -85,7 +88,6 @@ async def lending_deposits(
 
 @router.get(
     "/v1/lending/withdrawals/",
-    tags=["lending"],
     response_description="Lending Withdraw events",
     response_model=EventLendingWithdrawList
 )
@@ -111,7 +113,6 @@ async def lending_withdrawals(
 
 @router.get(
     "/v1/lending/add_ac_to_vault/",
-    tags=["lending"],
     response_description="Lending AddACtoVault events",
     response_model=EventLendingAddACtoVaultList
 )
@@ -137,7 +138,6 @@ async def lending_add_ac_to_vault(
 
 @router.get(
     "/v1/lending/remove_ac_from_vault/",
-    tags=["lending"],
     response_description="Lending RemoveACfromVault events",
     response_model=EventLendingRemoveACfromVaultList
 )
@@ -163,7 +163,6 @@ async def lending_remove_ac_from_vault(
 
 @router.get(
     "/v1/lending/borrows/",
-    tags=["lending"],
     response_description="Lending Borrow events",
     response_model=EventLendingBorrowList
 )
@@ -189,7 +188,6 @@ async def lending_borrows(
 
 @router.get(
     "/v1/lending/repays/",
-    tags=["lending"],
     response_description="Lending Repay events",
     response_model=EventLendingRepayList
 )
@@ -215,7 +213,6 @@ async def lending_repays(
 
 @router.get(
     "/v1/lending/repays_with_ac/",
-    tags=["lending"],
     response_description="Lending RepayWithAC events",
     response_model=EventLendingRepayWithACList
 )
@@ -240,7 +237,6 @@ async def lending_repays_with_ac(
 
 @router.get(
     "/v1/lending/liquidations/",
-    tags=["lending"],
     response_description="Lending Liquidate events",
     response_model=EventLendingLiquidateList
 )
@@ -266,7 +262,6 @@ async def lending_liquidations(
 
 @router.get(
     "/v1/lending/tp_injections/",
-    tags=["lending"],
     response_description="Lending TPInjection events",
     response_model=EventLendingTPInjectionList
 )
@@ -283,7 +278,6 @@ async def lending_tp_injections(
 
 @router.get(
     "/v1/lending/operation_queued/",
-    tags=["lending"],
     response_description="Lending OperationQueued events",
     response_model=EventLendingOperationQueuedList
 )
@@ -309,7 +303,6 @@ async def lending_operation_queued(
 
 @router.get(
     "/v1/lending/operation_error/",
-    tags=["lending"],
     response_description="Lending OperationError events",
     response_model=EventLendingOperationErrorList
 )
@@ -333,7 +326,6 @@ async def lending_operation_error(
 
 @router.get(
     "/v1/lending/operation_executed/",
-    tags=["lending"],
     response_description="Lending OperationExecuted events",
     response_model=EventLendingOperationExecutedList
 )
@@ -363,7 +355,6 @@ VALID_EVENT_NAMES = {
 
 @router.get(
     "/v1/lending/user_operations/",
-    tags=["lending"],
     response_description="Unified lending activity feed for a user across all event types",
     response_model=LendingUserOperationList
 )

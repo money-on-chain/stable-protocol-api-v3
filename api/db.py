@@ -2,12 +2,19 @@ import re
 from os import getenv
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from dotenv import load_dotenv
+from pymongo.collation import Collation
 
 from api.logger import log
 
 load_dotenv()
 
 db_client: AsyncIOMotorClient = None
+
+# Lets address queries match regardless of checksum casing while still
+# being able to use an index (unlike a $regex/i scan of every document).
+# The indexes themselves are built by the indexer with this same collation -
+# the API's mongo user may be read-only, so it never creates indexes itself.
+CASE_INSENSITIVE_COLLATION = Collation(locale="en", strength=2)
 
 # Upper bound for every operation (pymongo client-side operation timeout,
 # also sent to the server as maxTimeMS), so an expensive public query can't

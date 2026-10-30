@@ -33,10 +33,16 @@ This is a requirement for [stable-protocol-interface-v2](https://github.com/mone
 ___
 """
 
+# Set to a falsy value (false/0/no) to disable Swagger/ReDoc in production
+DOCS_ENABLED = getenv("DOCS_ENABLED", "true").lower() not in ("false", "0", "no")
 
 tags_metadata = [{
     "name": "Webapp",
     "description": "Mainly used from the webapp"}]
+
+tags_metadata += lending.tags_metadata
+tags_metadata += omoc.tags_metadata
+tags_metadata += voting.tags_metadata
 
 tags_metadata += [{
     "name": "Diagnosis",
@@ -52,10 +58,11 @@ app = FastAPI(
     title=API_TITLE,
     version=API_VERSION,
     description=API_DESCRIPTION,
-    openapi_url="/openapi.json",
-    docs_url="/",
+    openapi_url="/openapi.json" if DOCS_ENABLED else None,
+    docs_url="/" if DOCS_ENABLED else None,
+    redoc_url="/redoc" if DOCS_ENABLED else None,
     openapi_tags=tags_metadata,
-lifespan=lifespan
+    lifespan=lifespan,
 )
 
 app.include_router(operations.router)
