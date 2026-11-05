@@ -18,7 +18,8 @@ CASE_INSENSITIVE_COLLATION = Collation(locale="en", strength=2)
 
 # Upper bound for every operation (pymongo client-side operation timeout,
 # also sent to the server as maxTimeMS), so an expensive public query can't
-# keep the DB busy indefinitely. Keep it below nginx's proxy_read_timeout.
+# keep the DB busy indefinitely. Keep it below the load balancer's idle
+# timeout.
 MONGO_TIMEOUT_MS = int(getenv("APP_MONGO_TIMEOUT_MS", default="20000"))
 
 

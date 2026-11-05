@@ -62,10 +62,12 @@ docker run -d \
 --name stable_protocol_api_v2_roc_mainnet \
 --env APP_MONGO_URI=mongodb://localhost:27017 \
 --env APP_MONGO_DB=roc_mainnet \
---env BACKEND_CORS_ORIGINS=["*"] \
+--env EDGE_HEADERS=true \
 --env ALLOWED_HOSTS='["api-v2.rifonchain.com"]' \
 stable_protocol_api_v2
 ```
+
+`EDGE_HEADERS=true` makes the API send the CORS, security and `Cache-Control` headers itself. Set it on deployments served straight from the load balancer, with rate limiting and caching done by Cloudflare. Leave it unset on a deployment still behind the old nginx container, which sends the same headers: browsers reject a doubled `Access-Control-Allow-Origin`.
 
 `PROTOCOL_VERSION` (default `2`) is the stable protocol of the deployment's database, which picks the routers served besides OMoC, voting and lending (served by both):
 
@@ -75,7 +77,7 @@ stable_protocol_api_v2
 
 `ALLOWED_HOSTS` is the `Host` header this backend accepts: set it to the API's own hostname(s) for that environment, never `["*"]` (which disables the check). `/ping` is exempt, so ALB health checks by private IP keep working.
 
-`APP_MONGO_TIMEOUT_MS` (default `20000`) caps every database operation; a query that runs longer returns 503. Keep it below nginx's `proxy_read_timeout` (60s).
+`APP_MONGO_TIMEOUT_MS` (default `20000`) caps every database operation; a query that runs longer returns 503. Keep it below the load balancer's idle timeout (60s).
 
 The `/v1/omoc/voting/` endpoints serve the OMoC proposal history from the indexed VotingMachine events, matched by changer address to the MIP documents of the proposal registry ([money-on-chain/proposals-changers](https://github.com/money-on-chain/proposals-changers), `docs/proposals/proposals.json`). The registry and its documents are cached in memory for 5 minutes, and the last good copy is kept if a refresh fails.
 

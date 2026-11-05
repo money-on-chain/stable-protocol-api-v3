@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from os import getenv
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pymongo.errors import ExecutionTimeout, NetworkTimeout
@@ -38,6 +37,11 @@ ___
 
 # Set to a falsy value (false/0/no) to disable Swagger/ReDoc in production
 DOCS_ENABLED = getenv("DOCS_ENABLED", "true").lower() not in ("false", "0", "no")
+
+# Whether this API sends the edge headers itself (see EdgeHeadersMiddleware).
+# Only on deployments without nginx in front: it sends the same headers, and
+# browsers reject a doubled Access-Control-Allow-Origin.
+EDGE_HEADERS = getenv("EDGE_HEADERS", "false").lower() in ("true", "1", "yes")
 
 # Stable protocol version of the deployment's database: each indexer writes
 # its own collections, so only the matching routers are served.
@@ -187,6 +191,56 @@ class LegacyPrefixMiddleware:
         await self.app(scope, receive, send_deprecated)
 
 
+class EdgeHeadersMiddleware:
+    """CORS, security and cache headers of this public read-only API.
+
+    Sent on every response, with or without an Origin, unlike Starlette's
+    CORSMiddleware: otherwise Cloudflare can cache a response without CORS
+    headers (curl, Grafana) and serve it to browsers. `Cache-Control` is what
+    lets Cloudflare cache a successful response for a few seconds, which
+    protects the DB from the expensive queries. `/ping` is never cached, so
+    health checks reach the app.
+    """
+
+    HEADERS = [
+        (b"access-control-allow-origin", b"*"),
+        (b"access-control-allow-methods", b"GET, OPTIONS"),
+        (b"access-control-allow-headers", b"Content-Type"),
+        (b"x-content-type-options", b"nosniff"),
+        (b"x-frame-options", b"DENY"),
+        (b"referrer-policy", b"no-referrer"),
+        (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
+    ]
+    CACHE_CONTROL = (b"cache-control", b"public, max-age=15")
+    PREFLIGHT_MAX_AGE = (b"access-control-max-age", b"86400")
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] == "OPTIONS":
+            await send({"type": "http.response.start", "status": 204,
+                        "headers": [*self.HEADERS, self.PREFLIGHT_MAX_AGE]})
+            await send({"type": "http.response.body"})
+            return
+
+        cacheable = scope["method"] == "GET" and scope["path"] != "/ping"
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = [*message.get("headers", []), *self.HEADERS]
+                if cacheable and message["status"] == 200:
+                    headers.append(self.CACHE_CONTROL)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 if PROTOCOL_VERSION == "1":
     app.add_middleware(LegacyPrefixMiddleware)
 
@@ -194,6 +248,10 @@ if ALLOWED_HOSTS:
     # Guards against HTTP Host Header attacks
     app.add_middleware(HostValidationExemptMiddleware,
                        allowed_hosts=ALLOWED_HOSTS)
+
+if EDGE_HEADERS:
+    # Added last to be the outermost: errors get the headers too
+    app.add_middleware(EdgeHeadersMiddleware)
 
 
 log.info("Starting webservice API version: {0}".format(API_VERSION))
