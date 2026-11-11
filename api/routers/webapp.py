@@ -144,7 +144,9 @@ async def transactions_list(
         for key in ['createdAt', 'blockNumber']:
             row.append(tx.get(key, None))
         
-        asset = str(tx['tokenInvolved'])       
+        # Failed transactions (event ERROR) have no token, amount or
+        # direction, so none of these fields can be assumed
+        asset = str(tx.get('tokenInvolved') or '')
         if asset==TokenName.RISKPRO.value:
             asset = 'Pro'
         elif asset==TokenName.RISKPROX.value:
@@ -158,17 +160,17 @@ async def transactions_list(
         }.get(asset, asset)   
         row.append(asset)
 
-        event = str(tx['event']).lower()
+        event = str(tx.get('event') or '').lower()
         if 'mint' in event:
             event = 'mint'
         elif 'redeem' in event:
             event = 'redeem'
         row.append(event.title())
 
-        platform = Decimal(tx.get('amount', 0))/Decimal(10**18)
+        platform = Decimal(tx.get('amount') or 0)/Decimal(10**18)
         if event=='redeem':
             platform = -platform
-        elif event=='transfer' and not(tx['isPositive']):
+        elif event=='transfer' and not tx.get('isPositive'):
             platform = -platform
         row.append(platform)
 
