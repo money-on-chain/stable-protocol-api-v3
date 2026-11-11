@@ -122,8 +122,11 @@ async def transactions_base(
         query.append({
             '$group': {
                 '_id': '$address', 
+                # The account's earliest transaction: $first would depend
+                # on the order MongoDB reads them, and $min skips the
+                # transactions without a confirmationTime
                 'timestamp': {
-                    '$first': '$confirmationTime'
+                    '$min': '$confirmationTime'
                 }
             }
         })
