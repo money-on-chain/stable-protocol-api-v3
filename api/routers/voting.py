@@ -3,6 +3,7 @@ from typing import Annotated, Optional
 
 from api import registry, voting
 from api.logger import log
+from api.db import get_db
 from api.models.voting import \
     VotingProposalList, \
     VotingProposalDetail, \
@@ -11,30 +12,24 @@ from api.models.voting import \
     MipEntryList, \
     MipContent
 
-from api.db import get_db
+from .common import make_responses
+from .omoc import require_db, get_last_block_indexed
 
 
-router = APIRouter(tags=["omoc"])
+tags_metadata = [{
+    "name": "Voting",
+    "description": "OMoC VotingMachine proposal history, rebuilt from the "
+                   "indexed voting events, and the MIP documents of the "
+                   "proposal registry (money-on-chain/proposals-changers)"}]
+
+
+router = APIRouter(tags=["Voting"])
 
 ADDRESS_PATTERN = '^0x[a-fA-F0-9]{40}$'
 
 # Records are paginated in memory, so a negative skip would slice from the end
 LimitQuery = Annotated[int, Query(title="Limit", description="Limit", ge=1, le=100)]
 SkipQuery = Annotated[int, Query(title="Skip", description="Skip", ge=0, le=1000)]
-
-async def require_db():
-    db = await get_db()
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-    return db
-
-
-async def get_last_block_indexed(db) -> int:
-    indexer = await db["moc_indexer"].find_one(sort=[("updatedAt", -1)])
-    if indexer and 'last_raw_tx_block' in indexer:
-        return indexer['last_raw_tx_block']
-    return 0
-
 
 ProposalPath = Annotated[str, Path(
     title="Proposal address",
@@ -122,6 +117,7 @@ async def mip_content(entry):
     "/v1/omoc/voting/proposals/",
     response_description="Returns the proposals history, newest round first",
     response_model=VotingProposalList,
+    responses=make_responses(503),
 )
 async def voting_proposals(
         status: StatusQuery = None,
@@ -155,6 +151,7 @@ async def voting_proposals(
     "/v1/omoc/voting/proposals/{address}/",
     response_description="Returns a proposal's records, timeline and voters",
     response_model=VotingProposalDetail,
+    responses=make_responses(404, 503),
 )
 async def voting_proposal(address: ProposalPath):
     """Returns every record of a proposal with its milestones (submitted,
@@ -181,6 +178,7 @@ async def voting_proposal(address: ProposalPath):
     "/v1/omoc/voting/proposals/{address}/content/",
     response_description="Returns the MIP document of a proposal",
     response_model=MipContent,
+    responses=make_responses(404, 503),
 )
 async def voting_proposal_content(address: ProposalPath):
     """Returns the registry entry and markdown document of the MIP the changer
@@ -199,6 +197,7 @@ async def voting_proposal_content(address: ProposalPath):
     response_description="Returns the proposal registry, latest activity "
                          "first",
     response_model=MipEntryList,
+    responses=make_responses(503),
 )
 async def voting_mips(
         network: NetworkQuery = None,
@@ -227,6 +226,7 @@ async def voting_mips(
     "/v1/omoc/voting/mips/{mip}/",
     response_description="Returns a MIP's registry entry and document",
     response_model=MipContent,
+    responses=make_responses(404, 503),
 )
 async def voting_mip(mip: MipPath, network: NetworkQuery = None):
     """Returns a MIP's registry entry and markdown document, like
@@ -247,6 +247,7 @@ async def voting_mip(mip: MipPath, network: NetworkQuery = None):
     "/v1/omoc/voting/users/{address}/",
     response_description="Returns the proposals a user pre-voted or voted",
     response_model=UserVotingList,
+    responses=make_responses(503),
 )
 async def voting_user(
         address: UserPath,
@@ -278,6 +279,7 @@ async def voting_user(
     "/v1/omoc/voting/stats/",
     response_description="Returns governance participation statistics",
     response_model=VotingStats,
+    responses=make_responses(503),
 )
 async def voting_stats():
     """Returns proposal counts by status, unique participants and a summary

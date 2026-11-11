@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException
-from typing import Annotated
-from pymongo.collation import Collation
+from typing import Annotated, Optional
 
-from api.db import get_db
-
+from api.db import get_db, CASE_INSENSITIVE_COLLATION
 from api.models.omoc import DATE_FIELDS, \
     VestingCreatedList, \
     ClaimOKList, \
@@ -16,8 +14,8 @@ from api.models.omoc import DATE_FIELDS, \
     SupportersWithdrawList, \
     SupportersWithdrawStakeList, \
     StakingOperationList, \
-    VotingMachineVoteEventList, \
     VotingMachinePreVoteEventList, \
+    VotingMachineVoteEventList, \
     VotingMachinePreVoteStepEventList, \
     VotingMachineVoteStepEventList, \
     VotingMachineAcceptedStepEventList, \
@@ -37,9 +35,50 @@ from api.models.omoc import DATE_FIELDS, \
     TaskTriggerOrderTriggerOrdersRevertedList
 from api.utils import fields_date_to_str
 
+from .common import make_responses
 
-collation = Collation(locale="en", strength=2)
-router = APIRouter()
+
+tags_metadata = [{
+    "name": "OMoC",
+    "description": "On-chain Money on Chain governance: staking, vesting, "
+                   "delay machine, voting machine, oracle manager, "
+                   "decentralized oracle (CoinPairPrice) and keeper task "
+                   "(TasksRunner / TaskTriggerOrder) events"}]
+
+
+router = APIRouter(tags=["OMoC"])
+
+LimitQuery = Annotated[int, Query(title="Limit", description="Limit", ge=1, le=100)]
+SkipQuery = Annotated[int, Query(title="Skip", description="Skip", ge=0, le=1000)]
+HolderQuery = Annotated[str, Query(
+    title="Holder address",
+    description="Holder Address",
+    pattern='^0x[a-fA-F0-9]{40}$')]
+StakerQuery = Annotated[str, Query(
+    title="Staker address",
+    description="Address that staked: the user's wallet, or its vesting "
+                "contract for vesting holders",
+    pattern='^0x[a-fA-F0-9]{40}$')]
+AddressFilterQuery = Annotated[Optional[str], Query(
+    title="Address",
+    description="Optional filter matching the given address against any of the "
+                "event's address fields",
+    pattern='^0x[a-fA-F0-9]{40}$')]
+ProposalQuery = Annotated[Optional[str], Query(
+    title="Proposal address",
+    description="Optional filter by the proposal (ChangeContract) address",
+    pattern='^0x[a-fA-F0-9]{40}$')]
+CallerQuery = Annotated[Optional[str], Query(
+    title="Caller address",
+    description="Optional filter by the caller address",
+    pattern='^0x[a-fA-F0-9]{40}$')]
+CoinPairAddressQuery = Annotated[Optional[str], Query(
+    title="Coin pair address",
+    description="Optional filter by the CoinPairPrice contract address "
+                "(one deployment per coin pair)",
+    pattern='^0x[a-fA-F0-9]{40}$')]
+
+DEFAULT_HOLDER = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3'
 
 # `omoc_operations` rows that make up a user's staking history, grouped by the
 # field holding the end user's address: Supporters_* are emitted with the
@@ -53,1707 +92,615 @@ STAKING_DELAY_MACHINE_OPERATIONS = [
 ]
 
 
-@router.get(
-    "/v1/omoc/vesting_created/",
-    tags=["omoc"],
-    response_description="Returns vesting created from a holder address",
-    response_model=VestingCreatedList
-)
-async def vesting_created(
-        holder: Annotated[str, Query(
-            title="Holder address",
-            description="Holder Address",
-            pattern='^0x[a-fA-F0-9]{40}$')] = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3',
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 50,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+def address_in_any(address, fields):
+    """Filter matching `address` against any of the given address fields."""
+    if not address:
+        return None
+    return {"$or": [{field: address} for field in fields]}
 
-    # get mongo db connection
+
+async def require_db():
     db = await get_db()
-
     if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
+        raise HTTPException(status_code=503, detail="Cannot get DB access")
+    return db
 
-    query_filter = {
-        "holder": holder.lower()
-    }
 
-    rows = await db["event_VestingFactory_VestingCreated"]\
-        .find(query_filter, collation=collation)\
-        .sort("createdAt", -1)\
+async def get_last_block_indexed(db) -> int:
+    indexer = await db["moc_indexer"].find_one(sort=[("updatedAt", -1)])
+    if indexer and 'last_raw_tx_block' in indexer:
+        return indexer['last_raw_tx_block']
+    return 0
+
+
+async def list_events(db, collection, results_key='results', *,
+                      limit, skip, query_filter=None, collation=None):
+    """Shared query / paginate / serialize for the OMoC event collections."""
+    query_filter = query_filter or {}
+
+    cursor = db[collection].find(query_filter)
+    if collation is not None:
+        cursor = cursor.collation(collation)
+
+    rows = await cursor.sort("createdAt", -1)\
         .skip(skip)\
         .limit(limit)\
         .to_list(limit)
 
-    rows_count = await db["event_VestingFactory_VestingCreated"].count_documents(query_filter, collation=collation)
+    if query_filter:
+        count_kwargs = {"collation": collation} if collation is not None else {}
+        rows_count = await db[collection].count_documents(query_filter, **count_kwargs)
+    else:
+        # Unfiltered: read the collection metadata instead of scanning it
+        rows_count = await db[collection].estimated_document_count()
 
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
+    for row in rows:
+        row['_id'] = str(row['_id'])
+        fields_date_to_str(row, DATE_FIELDS)
 
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "transactions": rows,
+    return {
+        results_key: rows,
         "count": len(rows),
         "total": rows_count,
-        "last_block_indexed": last_block_indexed
+        "last_block_indexed": await get_last_block_indexed(db),
     }
 
-    return dict_values
+
+# --- Vesting / Incentive --------------------------------------------------------
+
+@router.get(
+    "/v1/omoc/vesting_created/",
+    response_description="Returns vesting created from a holder address",
+    response_model=VestingCreatedList,
+    responses=make_responses(503),
+)
+async def vesting_created(
+        holder: HolderQuery = DEFAULT_HOLDER,
+        limit: LimitQuery = 50,
+        skip: SkipQuery = 0):
+    """Returns the vesting contracts created for the given holder address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VestingFactory_VestingCreated", "transactions",
+        limit=limit, skip=skip,
+        query_filter={"holder": holder},
+        collation=CASE_INSENSITIVE_COLLATION)
 
 
 @router.get(
     "/v1/omoc/claim_ok/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=ClaimOKList
+    response_description="Returns incentive claims for a recipient address",
+    response_model=ClaimOKList,
+    responses=make_responses(503),
 )
 async def claim_ok(
-        holder: Annotated[str, Query(
-            title="Holder address",
-            description="Holder Address",
-            pattern='^0x[a-fA-F0-9]{40}$')] = '0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3',
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        holder: HolderQuery = DEFAULT_HOLDER,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the incentive claim events for the given recipient address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_IncentiveV2_ClaimOK", "results",
+        limit=limit, skip=skip,
+        query_filter={"recipient": holder},
+        collation=CASE_INSENSITIVE_COLLATION)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {
-        "recipient": holder.lower()
-    }
-
-    rows = await db["event_IncentiveV2_ClaimOK"]\
-        .find(query_filter, collation=collation)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_IncentiveV2_ClaimOK"].count_documents(query_filter, collation=collation)
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
+# --- Delay Machine ------------------------------------------------------------
 
 @router.get(
     "/v1/omoc/delay_machine_payment_cancel/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=DelayMachinePaymentCancelList
+    response_description="Returns the delay machine payment cancel events",
+    response_model=DelayMachinePaymentCancelList,
+    responses=make_responses(503),
 )
 async def delay_machine_payment_cancel(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_DelayMachine_PaymentCancel"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_DelayMachine_PaymentCancel"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        address: AddressFilterQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the delay machine payment cancel events, optionally filtered by
+    an address on either side of the payment (source or destination)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_DelayMachine_PaymentCancel", limit=limit, skip=skip,
+        query_filter=address_in_any(address, ("source", "destination")),
+        collation=CASE_INSENSITIVE_COLLATION if address else None)
 
 
 @router.get(
     "/v1/omoc/delay_machine_payment_deposit/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=DelayMachinePaymentDepositList
+    response_description="Returns the delay machine payment deposit events",
+    response_model=DelayMachinePaymentDepositList,
+    responses=make_responses(503),
 )
 async def delay_machine_payment_deposit(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_DelayMachine_PaymentDeposit"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_DelayMachine_PaymentDeposit"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        address: AddressFilterQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the delay machine payment deposit events, optionally filtered by
+    an address on either side of the payment (source or destination)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_DelayMachine_PaymentDeposit", limit=limit, skip=skip,
+        query_filter=address_in_any(address, ("source", "destination")),
+        collation=CASE_INSENSITIVE_COLLATION if address else None)
 
 
 @router.get(
     "/v1/omoc/delay_machine_payment_withdraw/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=DelayMachinePaymentWithdrawList
+    response_description="Returns the delay machine payment withdraw events",
+    response_model=DelayMachinePaymentWithdrawList,
+    responses=make_responses(503),
 )
 async def delay_machine_payment_withdraw(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        address: AddressFilterQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the delay machine payment withdraw events, optionally filtered by
+    an address on either side of the payment (source or destination)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_DelayMachine_PaymentWithdraw", limit=limit, skip=skip,
+        query_filter=address_in_any(address, ("source", "destination")),
+        collation=CASE_INSENSITIVE_COLLATION if address else None)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_DelayMachine_PaymentWithdraw"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_DelayMachine_PaymentWithdraw"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
+# --- Supporters ------------------------------------------------------------------
 
 @router.get(
     "/v1/omoc/supporters_add_stake/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=SupportersAddStakeList
+    response_description="Returns the supporters add stake events",
+    response_model=SupportersAddStakeList,
+    responses=make_responses(503),
 )
 async def supporters_add_stake(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_Supporters_AddStake"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_Supporters_AddStake"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        address: AddressFilterQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the supporters add stake events, optionally filtered by an
+    address (matched against user, subaccount or sender)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_Supporters_AddStake", limit=limit, skip=skip,
+        query_filter=address_in_any(address, ("user", "subaccount", "sender")),
+        collation=CASE_INSENSITIVE_COLLATION if address else None)
 
 
 @router.get(
     "/v1/omoc/supporters_cancel_earnings/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=SupportersCancelEarningsList
+    response_description="Returns the supporters cancel earnings events",
+    response_model=SupportersCancelEarningsList,
+    responses=make_responses(503),
 )
-async def supporters_cancel_earnings(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_Supporters_CancelEarnings"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_Supporters_CancelEarnings"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+async def supporters_cancel_earnings(limit: LimitQuery = 20, skip: SkipQuery = 0):
+    """Returns the supporters cancel earnings events."""
+    db = await require_db()
+    return await list_events(
+        db, "event_Supporters_CancelEarnings", limit=limit, skip=skip)
 
 
 @router.get(
     "/v1/omoc/supporters_pay_earnings/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=SupportersPayEarningsList
+    response_description="Returns the supporters pay earnings events",
+    response_model=SupportersPayEarningsList,
+    responses=make_responses(503),
 )
-async def supporters_pay_earnings(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_Supporters_PayEarnings"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_Supporters_PayEarnings"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+async def supporters_pay_earnings(limit: LimitQuery = 20, skip: SkipQuery = 0):
+    """Returns the supporters pay earnings events."""
+    db = await require_db()
+    return await list_events(
+        db, "event_Supporters_PayEarnings", limit=limit, skip=skip)
 
 
 @router.get(
     "/v1/omoc/supporters_withdraw/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=SupportersWithdrawList
+    response_description="Returns the supporters withdraw events",
+    response_model=SupportersWithdrawList,
+    responses=make_responses(503),
 )
 async def supporters_withdraw(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_Supporters_Withdraw"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_Supporters_Withdraw"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        address: AddressFilterQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the supporters withdraw events, optionally filtered by an
+    address (matched against msgSender, subaccount or receiver)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_Supporters_Withdraw", limit=limit, skip=skip,
+        query_filter=address_in_any(address, ("msgSender", "subaccount", "receiver")),
+        collation=CASE_INSENSITIVE_COLLATION if address else None)
 
 
 @router.get(
     "/v1/omoc/supporters_withdraw_stake/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=SupportersWithdrawStakeList
+    response_description="Returns the supporters withdraw stake events",
+    response_model=SupportersWithdrawStakeList,
+    responses=make_responses(503),
 )
 async def supporters_withdraw_stake(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        address: AddressFilterQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the supporters withdraw stake events, optionally filtered by an
+    address (matched against user, subaccount or destination)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_Supporters_WithdrawStake", limit=limit, skip=skip,
+        query_filter=address_in_any(address, ("user", "subaccount", "destination")),
+        collation=CASE_INSENSITIVE_COLLATION if address else None)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_Supporters_WithdrawStake"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_Supporters_WithdrawStake"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
+# --- Staking operations ----------------------------------------------------------
 
 @router.get(
     "/v1/omoc/staking_operations/",
-    tags=["omoc"],
     response_description="Returns the staking operations of an address",
-    response_model=StakingOperationList
+    response_model=StakingOperationList,
+    responses=make_responses(503),
 )
 async def staking_operations(
-        address: Annotated[str, Query(
-            title="Staker address",
-            description="Address that staked: the user's wallet, or its vesting "
-                        "contract for vesting holders",
-            pattern='^0x[a-fA-F0-9]{40}$')],
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        address: StakerQuery,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
     """Returns the staking history (stake, unstake, cancel and withdraw of a
-    pending withdrawal) of the given address, newest first. A single user
-    action can emit more than one row with the same hash (e.g. unstake =
-    Supporters_WithdrawStake + DelayMachine_PaymentDeposit)."""
+    pending withdrawal) of the given address, newest first. For vesting
+    holders pass the vesting contract address, which is the one that stakes.
+    A single user action can emit more than one row with the same hash (e.g.
+    unstake = Supporters_WithdrawStake + DelayMachine_PaymentDeposit)."""
+    db = await require_db()
+    return await list_events(
+        db, "omoc_operations", limit=limit, skip=skip,
+        query_filter={"$or": [
+            {"operation": {"$in": STAKING_SUPPORTERS_OPERATIONS},
+             "subaccount": address},
+            {"operation": {"$in": STAKING_DELAY_MACHINE_OPERATIONS},
+             "destination": address},
+        ]},
+        collation=CASE_INSENSITIVE_COLLATION)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
+# --- Voting Machine ---------------------------------------------------------------
 
-    query_filter = {"$or": [
-        {"operation": {"$in": STAKING_SUPPORTERS_OPERATIONS},
-         "subaccount": address},
-        {"operation": {"$in": STAKING_DELAY_MACHINE_OPERATIONS},
-         "destination": address},
-    ]}
-
-    rows = await db["omoc_operations"]\
-        .find(query_filter, collation=collation)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["omoc_operations"].count_documents(query_filter, collation=collation)
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+@router.get(
+    "/v1/omoc/voting_machine_pre_vote_event/",
+    response_description="Returns the voting machine pre-vote events",
+    response_model=VotingMachinePreVoteEventList,
+    responses=make_responses(503),
+)
+async def voting_machine_pre_vote_event(limit: LimitQuery = 20, skip: SkipQuery = 0):
+    """Returns the voting machine pre-vote events."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VotingMachine_PreVoteEvent", limit=limit, skip=skip)
 
 
 @router.get(
     "/v1/omoc/voting_machine_vote_event/",
-    tags=["omoc"],
-    response_description="Returns Claim from a holder address",
-    response_model=VotingMachineVoteEventList
+    response_description="Returns the voting machine vote events",
+    response_model=VotingMachineVoteEventList,
+    responses=make_responses(503),
 )
 async def voting_machine_vote_event(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_VotingMachine_VoteEvent"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_VotingMachine_VoteEvent"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
-
-@router.get(
-    "/v1/omoc/voting_machine_pre_vote_event/",
-    tags=["omoc"],
-    response_description="Returns voting machine pre-vote events",
-    response_model=VotingMachinePreVoteEventList
-)
-async def voting_machine_pre_vote_event(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_VotingMachine_PreVoteEvent"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_VotingMachine_PreVoteEvent"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        proposal: ProposalQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the voting machine vote events, optionally filtered by proposal
+    address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VotingMachine_VoteEvent", limit=limit, skip=skip,
+        query_filter={"proposal": proposal} if proposal else None,
+        collation=CASE_INSENSITIVE_COLLATION if proposal else None)
 
 
 @router.get(
     "/v1/omoc/voting_machine_pre_vote_step_event/",
-    tags=["omoc"],
-    response_description="Returns voting machine pre-vote step events",
-    response_model=VotingMachinePreVoteStepEventList
+    response_description="Returns the voting machine pre-vote step events",
+    response_model=VotingMachinePreVoteStepEventList,
+    responses=make_responses(503),
 )
 async def voting_machine_pre_vote_step_event(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_VotingMachine_PreVoteStepEvent"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_VotingMachine_PreVoteStepEvent"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        proposal: ProposalQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the voting machine pre-vote step events, optionally filtered by
+    proposal address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VotingMachine_PreVoteStepEvent", limit=limit, skip=skip,
+        query_filter={"proposal": proposal} if proposal else None,
+        collation=CASE_INSENSITIVE_COLLATION if proposal else None)
 
 
 @router.get(
     "/v1/omoc/voting_machine_vote_step_event/",
-    tags=["omoc"],
-    response_description="Returns voting machine vote step events",
-    response_model=VotingMachineVoteStepEventList
+    response_description="Returns the voting machine vote step events",
+    response_model=VotingMachineVoteStepEventList,
+    responses=make_responses(503),
 )
-async def voting_machine_vote_step_event(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_VotingMachine_VoteStepEvent"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_VotingMachine_VoteStepEvent"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+async def voting_machine_vote_step_event(limit: LimitQuery = 20, skip: SkipQuery = 0):
+    """Returns the voting machine vote step events."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VotingMachine_VoteStepEvent", limit=limit, skip=skip)
 
 
 @router.get(
     "/v1/omoc/voting_machine_accepted_step_event/",
-    tags=["omoc"],
-    response_description="Returns voting machine accepted step events",
-    response_model=VotingMachineAcceptedStepEventList
+    response_description="Returns the voting machine accepted step events",
+    response_model=VotingMachineAcceptedStepEventList,
+    responses=make_responses(503),
 )
 async def voting_machine_accepted_step_event(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_VotingMachine_AcceptedStepEvent"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_VotingMachine_AcceptedStepEvent"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        proposal: ProposalQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the voting machine accepted step events, optionally filtered by
+    proposal address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VotingMachine_AcceptedStepEvent", limit=limit, skip=skip,
+        query_filter={"proposal": proposal} if proposal else None,
+        collation=CASE_INSENSITIVE_COLLATION if proposal else None)
 
 
 @router.get(
     "/v1/omoc/voting_machine_unregister_event/",
-    tags=["omoc"],
-    response_description="Returns voting machine unregister events",
-    response_model=VotingMachineUnregisterEventList
+    response_description="Returns the voting machine unregister events",
+    response_model=VotingMachineUnregisterEventList,
+    responses=make_responses(503),
 )
 async def voting_machine_unregister_event(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        proposal: ProposalQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the voting machine unregister events, optionally filtered by
+    proposal address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_VotingMachine_UnregisterEvent", limit=limit, skip=skip,
+        query_filter={"proposal": proposal} if proposal else None,
+        collation=CASE_INSENSITIVE_COLLATION if proposal else None)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_VotingMachine_UnregisterEvent"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_VotingMachine_UnregisterEvent"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
+# --- Oracle Manager -------------------------------------------------------------
 
 @router.get(
     "/v1/omoc/oracle_manager_oracle_registered/",
-    tags=["omoc"],
-    response_description="Returns oracle manager oracle registered events",
-    response_model=OracleManagerOracleRegisteredList
+    response_description="Returns the oracle manager oracle registered events",
+    response_model=OracleManagerOracleRegisteredList,
+    responses=make_responses(503),
 )
 async def oracle_manager_oracle_registered(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_OracleManager_OracleRegistered"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_OracleManager_OracleRegistered"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        caller: CallerQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the oracle manager oracle registered events, optionally filtered
+    by caller address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_OracleManager_OracleRegistered", limit=limit, skip=skip,
+        query_filter={"caller": caller} if caller else None,
+        collation=CASE_INSENSITIVE_COLLATION if caller else None)
 
 
 @router.get(
     "/v1/omoc/oracle_manager_oracle_stake_added/",
-    tags=["omoc"],
-    response_description="Returns oracle manager oracle stake added events",
-    response_model=OracleManagerOracleStakeAddedList
+    response_description="Returns the oracle manager oracle stake added events",
+    response_model=OracleManagerOracleStakeAddedList,
+    responses=make_responses(503),
 )
 async def oracle_manager_oracle_stake_added(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_OracleManager_OracleStakeAdded"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_OracleManager_OracleStakeAdded"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        caller: CallerQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the oracle manager oracle stake added events, optionally filtered
+    by caller address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_OracleManager_OracleStakeAdded", limit=limit, skip=skip,
+        query_filter={"caller": caller} if caller else None,
+        collation=CASE_INSENSITIVE_COLLATION if caller else None)
 
 
 @router.get(
     "/v1/omoc/oracle_manager_oracle_subscribed/",
-    tags=["omoc"],
-    response_description="Returns oracle manager oracle subscribed events",
-    response_model=OracleManagerOracleSubscribedList
+    response_description="Returns the oracle manager oracle subscribed events",
+    response_model=OracleManagerOracleSubscribedList,
+    responses=make_responses(503),
 )
 async def oracle_manager_oracle_subscribed(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_OracleManager_OracleSubscribed"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_OracleManager_OracleSubscribed"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        caller: CallerQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the oracle manager oracle subscribed events, optionally filtered
+    by caller address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_OracleManager_OracleSubscribed", limit=limit, skip=skip,
+        query_filter={"caller": caller} if caller else None,
+        collation=CASE_INSENSITIVE_COLLATION if caller else None)
 
 
 @router.get(
     "/v1/omoc/oracle_manager_oracle_unsubscribed/",
-    tags=["omoc"],
-    response_description="Returns oracle manager oracle unsubscribed events",
-    response_model=OracleManagerOracleUnsubscribedList
+    response_description="Returns the oracle manager oracle unsubscribed events",
+    response_model=OracleManagerOracleUnsubscribedList,
+    responses=make_responses(503),
 )
 async def oracle_manager_oracle_unsubscribed(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_OracleManager_OracleUnsubscribed"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_OracleManager_OracleUnsubscribed"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        caller: CallerQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the oracle manager oracle unsubscribed events, optionally filtered
+    by caller address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_OracleManager_OracleUnsubscribed", limit=limit, skip=skip,
+        query_filter={"caller": caller} if caller else None,
+        collation=CASE_INSENSITIVE_COLLATION if caller else None)
 
 
 @router.get(
     "/v1/omoc/oracle_manager_oracle_removed/",
-    tags=["omoc"],
-    response_description="Returns oracle manager oracle removed events",
-    response_model=OracleManagerOracleRemovedList
+    response_description="Returns the oracle manager oracle removed events",
+    response_model=OracleManagerOracleRemovedList,
+    responses=make_responses(503),
 )
 async def oracle_manager_oracle_removed(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        caller: CallerQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the oracle manager oracle removed events, optionally filtered by
+    caller address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_OracleManager_OracleRemoved", limit=limit, skip=skip,
+        query_filter={"caller": caller} if caller else None,
+        collation=CASE_INSENSITIVE_COLLATION if caller else None)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_OracleManager_OracleRemoved"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_OracleManager_OracleRemoved"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
+# --- CoinPairPrice (decentralized oracles) ------------------------------------
 
 @router.get(
     "/v1/omoc/coin_pair_price_price_published/",
-    tags=["omoc"],
-    response_description="Returns CoinPairPrice price published events",
-    response_model=CoinPairPricePricePublishedList
+    response_description="Returns the CoinPairPrice price published events",
+    response_model=CoinPairPricePricePublishedList,
+    responses=make_responses(503),
 )
 async def coin_pair_price_price_published(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_CoinPairPrice_PricePublished"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_CoinPairPrice_PricePublished"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        coin_pair_address: CoinPairAddressQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the CoinPairPrice price published events, optionally filtered by
+    the coin pair's contract address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_CoinPairPrice_PricePublished", limit=limit, skip=skip,
+        query_filter={"contractAddress": coin_pair_address} if coin_pair_address else None,
+        collation=CASE_INSENSITIVE_COLLATION if coin_pair_address else None)
 
 
 @router.get(
     "/v1/omoc/coin_pair_price_emergency_price_published/",
-    tags=["omoc"],
-    response_description="Returns CoinPairPrice emergency price published events",
-    response_model=CoinPairPriceEmergencyPricePublishedList
+    response_description="Returns the CoinPairPrice emergency price published events",
+    response_model=CoinPairPriceEmergencyPricePublishedList,
+    responses=make_responses(503),
 )
 async def coin_pair_price_emergency_price_published(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_CoinPairPrice_EmergencyPricePublished"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_CoinPairPrice_EmergencyPricePublished"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        coin_pair_address: CoinPairAddressQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the CoinPairPrice emergency price published events, optionally
+    filtered by the coin pair's contract address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_CoinPairPrice_EmergencyPricePublished", limit=limit, skip=skip,
+        query_filter={"contractAddress": coin_pair_address} if coin_pair_address else None,
+        collation=CASE_INSENSITIVE_COLLATION if coin_pair_address else None)
 
 
 @router.get(
     "/v1/omoc/coin_pair_price_forced_price_query_mode_set/",
-    tags=["omoc"],
-    response_description="Returns CoinPairPrice forced price query mode set events",
-    response_model=CoinPairPriceForcedPriceQueryModeSetList
+    response_description="Returns the CoinPairPrice forced price query mode set events",
+    response_model=CoinPairPriceForcedPriceQueryModeSetList,
+    responses=make_responses(503),
 )
 async def coin_pair_price_forced_price_query_mode_set(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_CoinPairPrice_ForcedPriceQueryModeSet"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_CoinPairPrice_ForcedPriceQueryModeSet"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        coin_pair_address: CoinPairAddressQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the CoinPairPrice forced price query mode set events, optionally
+    filtered by the coin pair's contract address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_CoinPairPrice_ForcedPriceQueryModeSet", limit=limit, skip=skip,
+        query_filter={"contractAddress": coin_pair_address} if coin_pair_address else None,
+        collation=CASE_INSENSITIVE_COLLATION if coin_pair_address else None)
 
 
 @router.get(
     "/v1/omoc/coin_pair_price_oracle_reward_transfer/",
-    tags=["omoc"],
-    response_description="Returns CoinPairPrice oracle reward transfer events",
-    response_model=CoinPairPriceOracleRewardTransferList
+    response_description="Returns the CoinPairPrice oracle reward transfer events",
+    response_model=CoinPairPriceOracleRewardTransferList,
+    responses=make_responses(503),
 )
 async def coin_pair_price_oracle_reward_transfer(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_CoinPairPrice_OracleRewardTransfer"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_CoinPairPrice_OracleRewardTransfer"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        coin_pair_address: CoinPairAddressQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the CoinPairPrice oracle reward transfer events, optionally
+    filtered by the coin pair's contract address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_CoinPairPrice_OracleRewardTransfer", limit=limit, skip=skip,
+        query_filter={"contractAddress": coin_pair_address} if coin_pair_address else None,
+        collation=CASE_INSENSITIVE_COLLATION if coin_pair_address else None)
 
 
 @router.get(
     "/v1/omoc/coin_pair_price_new_round/",
-    tags=["omoc"],
-    response_description="Returns CoinPairPrice new round events",
-    response_model=CoinPairPriceNewRoundList
+    response_description="Returns the CoinPairPrice new round events",
+    response_model=CoinPairPriceNewRoundList,
+    responses=make_responses(503),
 )
 async def coin_pair_price_new_round(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_CoinPairPrice_NewRound"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_CoinPairPrice_NewRound"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+        coin_pair_address: CoinPairAddressQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the CoinPairPrice new round events, optionally filtered by the
+    coin pair's contract address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_CoinPairPrice_NewRound", limit=limit, skip=skip,
+        query_filter={"contractAddress": coin_pair_address} if coin_pair_address else None,
+        collation=CASE_INSENSITIVE_COLLATION if coin_pair_address else None)
 
 
 @router.get(
     "/v1/omoc/coin_pair_price_oracle_auto_unsubscribed/",
-    tags=["omoc"],
-    response_description="Returns CoinPairPrice oracle auto unsubscribed events",
-    response_model=CoinPairPriceOracleAutoUnsubscribedList
+    response_description="Returns the CoinPairPrice oracle auto unsubscribed events",
+    response_model=CoinPairPriceOracleAutoUnsubscribedList,
+    responses=make_responses(503),
 )
 async def coin_pair_price_oracle_auto_unsubscribed(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
+        coin_pair_address: CoinPairAddressQuery = None,
+        limit: LimitQuery = 20,
+        skip: SkipQuery = 0):
+    """Returns the CoinPairPrice oracle auto unsubscribed events, optionally
+    filtered by the coin pair's contract address."""
+    db = await require_db()
+    return await list_events(
+        db, "event_CoinPairPrice_OracleAutoUnsubscribed", limit=limit, skip=skip,
+        query_filter={"contractAddress": coin_pair_address} if coin_pair_address else None,
+        collation=CASE_INSENSITIVE_COLLATION if coin_pair_address else None)
 
-    # get mongo db connection
-    db = await get_db()
 
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_CoinPairPrice_OracleAutoUnsubscribed"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_CoinPairPrice_OracleAutoUnsubscribed"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
-
+# --- Keeper tasks (TasksRunner / TaskTriggerOrder) --------------------------
 
 @router.get(
     "/v1/omoc/tasks_runner_task_executed/",
-    tags=["omoc"],
-    response_description="Returns TasksRunner task executed events",
-    response_model=TasksRunnerTaskExecutedList
+    response_description="Returns the TasksRunner task executed events",
+    response_model=TasksRunnerTaskExecutedList,
+    responses=make_responses(503),
 )
-async def tasks_runner_task_executed(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_TasksRunner_TaskExecuted"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_TasksRunner_TaskExecuted"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+async def tasks_runner_task_executed(limit: LimitQuery = 20, skip: SkipQuery = 0):
+    """Returns the TasksRunner task executed events (one log per task run in a
+    keeper batch)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_TasksRunner_TaskExecuted", limit=limit, skip=skip)
 
 
 @router.get(
     "/v1/omoc/task_trigger_order_trigger_orders_reverted/",
-    tags=["omoc"],
-    response_description="Returns TaskTriggerOrder trigger orders reverted events",
-    response_model=TaskTriggerOrderTriggerOrdersRevertedList
+    response_description="Returns the TaskTriggerOrder trigger orders reverted events",
+    response_model=TaskTriggerOrderTriggerOrdersRevertedList,
+    responses=make_responses(503),
 )
-async def task_trigger_order_trigger_orders_reverted(
-        limit: Annotated[int, Query(
-            title="Limit",
-            description="Limit",
-            ge=1, le=100)] = 20,
-        skip: Annotated[int, Query(
-            title="Skip",
-            description="Skip",
-            ge=0, le=1000)] = 0):
-
-    # get mongo db connection
-    db = await get_db()
-
-    if db is None:
-        raise HTTPException(status_code=400, detail="Cannot get DB")
-
-    query_filter = {}
-
-    rows = await db["event_TaskTriggerOrder_TriggerOrdersReverted"]\
-        .find(query_filter)\
-        .sort("createdAt", -1)\
-        .skip(skip)\
-        .limit(limit)\
-        .to_list(limit)
-
-    rows_count = await db["event_TaskTriggerOrder_TriggerOrdersReverted"].estimated_document_count()
-
-    for trx in rows:
-        trx['_id'] = str(trx['_id'])
-        fields_date_to_str(trx, DATE_FIELDS)
-
-    # Last block indexed
-    indexer = await db["moc_indexer"] \
-        .find_one(sort=[("updatedAt", -1)])
-
-    last_block_indexed = 0
-    if indexer:
-        if 'last_raw_tx_block' in indexer:
-            last_block_indexed = indexer['last_raw_tx_block']
-
-    dict_values = {
-        "results": rows,
-        "count": len(rows),
-        "total": rows_count,
-        "last_block_indexed": last_block_indexed
-    }
-
-    return dict_values
+async def task_trigger_order_trigger_orders_reverted(limit: LimitQuery = 20, skip: SkipQuery = 0):
+    """Returns the mocFlow TaskTriggerOrder trigger orders reverted events
+    (emitted only when the reverse-auction triggerOrders() call reverts)."""
+    db = await require_db()
+    return await list_events(
+        db, "event_TaskTriggerOrder_TriggerOrdersReverted", limit=limit, skip=skip)

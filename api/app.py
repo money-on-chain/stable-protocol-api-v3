@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from os import getenv
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pymongo.errors import ExecutionTimeout, NetworkTimeout
@@ -12,9 +11,12 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.routers import operations
 from api.routers import events
+from api.routers import webapp
+from api.routers import stats
 from api.routers import omoc
 from api.routers import voting
 from api.routers import lending
+from api.routers import incentives
 from api.models.base import InfoApi
 from api.logger import log
 from api.db import connect_and_init_db, close_db_connect
@@ -26,17 +28,48 @@ async def lifespan(app: FastAPI):
     await close_db_connect()
 
 
-API_VERSION = '1.2.13'
+API_VERSION = '1.3.1'
 API_TITLE = 'Stable Protocol API v3'
 API_DESCRIPTION = """
 This is a requirement for [stable-protocol-interface-v2](https://github.com/money-on-chain/stable-protocol-interface-v3)
 ___
 """
 
+# Set to a falsy value (false/0/no) to disable Swagger/ReDoc in production
+DOCS_ENABLED = getenv("DOCS_ENABLED", "true").lower() not in ("false", "0", "no")
+
+# Whether this API sends the edge headers itself (see EdgeHeadersMiddleware).
+# Only on deployments without nginx in front: it sends the same headers, and
+# browsers reject a doubled Access-Control-Allow-Origin.
+EDGE_HEADERS = getenv("EDGE_HEADERS", "false").lower() in ("true", "1", "yes")
+
+# Stable protocol version of the deployment's database: each indexer writes
+# its own collections, so only the matching routers are served.
+#   "1": MoC v1, stable-protocol-indexer (`Transaction`) and MoC_Incentive
+#        (`mocin_*`)
+#   "2": MoC v2 (RoC, Flipmoney...), stable-protocol-indexer-v3
+#        (`operations`, `event_Moc*`)
+# The OMoC, voting and lending routers are served by both.
+PROTOCOL_VERSION = getenv("PROTOCOL_VERSION", default="2")
+PROTOCOL_ROUTERS = {
+    "1": [webapp, stats, incentives],
+    "2": [operations, events],
+}
+if PROTOCOL_VERSION not in PROTOCOL_ROUTERS:
+    raise RuntimeError(
+        f"PROTOCOL_VERSION must be one of {sorted(PROTOCOL_ROUTERS)}, "
+        f"not {PROTOCOL_VERSION!r}")
 
 tags_metadata = [{
     "name": "Webapp",
     "description": "Mainly used from the webapp"}]
+
+if PROTOCOL_VERSION == "1":
+    tags_metadata += stats.tags_metadata
+    tags_metadata += incentives.tags_metadata
+tags_metadata += lending.tags_metadata
+tags_metadata += omoc.tags_metadata
+tags_metadata += voting.tags_metadata
 
 tags_metadata += [{
     "name": "Diagnosis",
@@ -52,14 +85,15 @@ app = FastAPI(
     title=API_TITLE,
     version=API_VERSION,
     description=API_DESCRIPTION,
-    openapi_url="/openapi.json",
-    docs_url="/",
+    openapi_url="/openapi.json" if DOCS_ENABLED else None,
+    docs_url="/" if DOCS_ENABLED else None,
+    redoc_url="/redoc" if DOCS_ENABLED else None,
     openapi_tags=tags_metadata,
-lifespan=lifespan
+    lifespan=lifespan,
 )
 
-app.include_router(operations.router)
-app.include_router(events.router)
+for module in PROTOCOL_ROUTERS[PROTOCOL_VERSION]:
+    app.include_router(module.router)
 app.include_router(omoc.router)
 app.include_router(voting.router)
 app.include_router(lending.router)
@@ -105,10 +139,119 @@ class HostValidationExemptMiddleware:
             await self.trusted_host_app(scope, receive, send)
 
 
+class LegacyPrefixMiddleware:
+    """Serves the paths of the services this API replaced, which the old
+    dapp and stable-protocol-interface-v3's MoC v1 build still call, at
+    their current paths, marked with a `Deprecation` header:
+
+    - `/api/v1/...` as `/v1/...`: the MoC v1 API (stable-protocol-api).
+    - `/balance/...`, `/claims/...` and `/agent` as `/v1/incentives/...`:
+      MoC_Incentive's miniwebservice (moc-incentives.moneyonchain.com).
+    """
+
+    # (legacy, current): path prefixes, or whole paths when not ending in "/"
+    LEGACY = [
+        ("/api/v1/", "/v1/"),
+        ("/balance/", "/v1/incentives/balance/"),
+        ("/claims/", "/v1/incentives/claims/"),
+        ("/agent/", "/v1/incentives/agent/"),
+        ("/agent", "/v1/incentives/agent/"),
+    ]
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    @classmethod
+    def _current(cls, path):
+        for legacy, current in cls.LEGACY:
+            if legacy.endswith("/") and path.startswith(legacy):
+                return legacy, current
+            if path == legacy:
+                return legacy, current
+        return None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        found = self._current(scope["path"]) if scope["type"] == "http" else None
+        if found is None:
+            await self.app(scope, receive, send)
+            return
+
+        legacy, current = found
+        scope = {**scope, "path": current + scope["path"][len(legacy):]}
+        raw_path = scope.get("raw_path")
+        if raw_path and raw_path.startswith(legacy.encode()):
+            scope["raw_path"] = current.encode() + raw_path[len(legacy):]
+
+        async def send_deprecated(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [
+                    *message.get("headers", []), (b"deprecation", b"true")]}
+            await send(message)
+
+        await self.app(scope, receive, send_deprecated)
+
+
+class EdgeHeadersMiddleware:
+    """CORS, security and cache headers of this public read-only API.
+
+    Sent on every response, with or without an Origin, unlike Starlette's
+    CORSMiddleware: otherwise Cloudflare can cache a response without CORS
+    headers (curl, Grafana) and serve it to browsers. `Cache-Control` is what
+    lets Cloudflare cache a successful response for a few seconds, which
+    protects the DB from the expensive queries. `/ping` is never cached, so
+    health checks reach the app.
+    """
+
+    HEADERS = [
+        (b"access-control-allow-origin", b"*"),
+        (b"access-control-allow-methods", b"GET, OPTIONS"),
+        (b"access-control-allow-headers", b"Content-Type"),
+        (b"x-content-type-options", b"nosniff"),
+        (b"x-frame-options", b"DENY"),
+        (b"referrer-policy", b"no-referrer"),
+        (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
+    ]
+    CACHE_CONTROL = (b"cache-control", b"public, max-age=15")
+    PREFLIGHT_MAX_AGE = (b"access-control-max-age", b"86400")
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] == "OPTIONS":
+            await send({"type": "http.response.start", "status": 204,
+                        "headers": [*self.HEADERS, self.PREFLIGHT_MAX_AGE]})
+            await send({"type": "http.response.body"})
+            return
+
+        cacheable = scope["method"] == "GET" and scope["path"] != "/ping"
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = [*message.get("headers", []), *self.HEADERS]
+                if cacheable and message["status"] == 200:
+                    headers.append(self.CACHE_CONTROL)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+if PROTOCOL_VERSION == "1":
+    app.add_middleware(LegacyPrefixMiddleware)
+
 if ALLOWED_HOSTS:
     # Guards against HTTP Host Header attacks
     app.add_middleware(HostValidationExemptMiddleware,
                        allowed_hosts=ALLOWED_HOSTS)
+
+if EDGE_HEADERS:
+    # Added last to be the outermost: errors get the headers too
+    app.add_middleware(EdgeHeadersMiddleware)
 
 
 log.info("Starting webservice API version: {0}".format(API_VERSION))

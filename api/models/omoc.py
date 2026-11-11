@@ -8,6 +8,7 @@ DATE_FIELDS = [
     'lastUpdatedAt',
 ]
 
+
 class VestingCreated(BaseModel):
     id: str = Field(default_factory=uuid.uuid4, alias="_id")
     hash: Optional[str] = None
@@ -50,7 +51,7 @@ class VestingCreatedList(BaseModel):
 
 class ClaimOK(BaseModel):
     id: str = Field(default_factory=uuid.uuid4, alias="_id")
-    hash: Optional[str]
+    hash: Optional[str] = None
     blockNumber: Optional[int] = None
     recipient: Optional[str] = None
     origin: Optional[str] = None
@@ -510,10 +511,10 @@ class VotingMachineVoteEvent(BaseModel):
     hash: Optional[str] = None
     blockNumber: Optional[int] = None
     user: Optional[str] = None
-    subacount: Optional[str] = None
-    destination: Optional[str] = None
-    amount: Optional[str] = None
-    mocs: Optional[str] = None
+    proposal: Optional[str] = None
+    inFavorAgainst: Optional[bool] = None
+    stake: Optional[str] = None
+    round: Optional[int] = None
     createdAt: Optional[datetime.datetime] = None
     lastUpdatedAt: Optional[datetime.datetime] = None
 
@@ -524,10 +525,10 @@ class VotingMachineVoteEvent(BaseModel):
                 "hash": "0xaddc1a3b49fcd5528a4a394d98e095c1f89475e1e30b9a237e93231c15e4a265",
                 "blockNumber": 4643915,
                 "user": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
-                "subacount": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
-                "destination": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
-                "amount": "177577695063561323",
-                "mocs": "177577695063561323",
+                "proposal": "0xF20Ee80f56F41b6323D140b07A011c77509Fb99D",
+                "inFavorAgainst": True,
+                "stake": "177577695063561323",
+                "round": 3,
                 "createdAt": "2023-12-28T14:15:01.629000Z",
                 "lastUpdatedAt": "2023-12-28T14:15:01.629000Z"
             }
@@ -1276,9 +1277,9 @@ class TasksRunnerTaskExecuted(BaseModel):
                 "hash": "0xaddc1a3b49fcd5528a4a394d98e095c1f89475e1e30b9a237e93231c15e4a265",
                 "blockNumber": 4643915,
                 "sender": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
-                "votedOracle": "0xCD8A1c9aCc980ae031456573e34dC05cD7daE6e3",
-                "task": "0xF20Ee80f56F41b6323D140b07A011c77509Fb99D",
-                "taskBlockNumber": "4643900",
+                "votedOracle": "0xF20Ee80f56F41b6323D140b07A011c77509Fb99D",
+                "task": "0x8a4f9f6b8e2c1d0a3b5e7c9d1f2a4b6c8d0e2f4a",
+                "taskBlockNumber": "4643910",
                 "success": True,
                 "createdAt": "2023-12-28T14:15:01.629000Z",
                 "lastUpdatedAt": "2023-12-28T14:15:01.629000Z"
@@ -1318,8 +1319,8 @@ class TaskTriggerOrderTriggerOrdersReverted(BaseModel):
                 "_id": "658dac848e6961287ceb62e5",
                 "hash": "0xaddc1a3b49fcd5528a4a394d98e095c1f89475e1e30b9a237e93231c15e4a265",
                 "blockNumber": 4643915,
-                "reason": "revert reason string",
-                "data": "0x08c379a0",
+                "reason": "auction not started",
+                "data": "0x",
                 "createdAt": "2023-12-28T14:15:01.629000Z",
                 "lastUpdatedAt": "2023-12-28T14:15:01.629000Z"
             }

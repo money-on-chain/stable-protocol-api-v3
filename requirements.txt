@@ -3,13 +3,14 @@ fastapi==0.159.1
 # (BadHost) and the other 2026 Starlette advisories
 starlette==1.9.0
 motor==3.7.1
-pydantic==2.14.1
+pydantic==2.14.3
 # Supports MongoDB 3.6+, like the 4.6.3 it replaces. It lacks the 2026 fixes
 # (PYSEC-2026-4294..4297, fixed in 4.18.2, which needs MongoDB 4.4+): move to
 # 4.18.2+ once every environment's MongoDB is 4.4 or newer.
 pymongo==4.10.1
 uvicorn==0.54.0
 python-dotenv==1.2.4
+tabulate==0.10.0
 httpx==0.28.1
 # The registry client verifies TLS against the system store (see
 # Dockerfile.api); certifi is kept at a release that at least drops the root
