@@ -3,7 +3,7 @@ fastapi==0.159.1
 # (BadHost) and the other 2026 Starlette advisories
 starlette==1.9.0
 motor==3.7.1
-pydantic==2.14.1
+pydantic==2.14.3
 # Supports MongoDB 3.6+, like the 4.6.3 it replaces. It lacks the 2026 fixes
 # (PYSEC-2026-4294..4297, fixed in 4.18.2, which needs MongoDB 4.4+): move to
 # 4.18.2+ once every environment's MongoDB is 4.4 or newer.
