@@ -145,8 +145,10 @@ async def transactions_base(
                         'format': '%Y-%m-%d', 
                         'date': {
                             '$dateFromParts': {
+                                # The year of the ISO week, not the calendar
+                                # year: they differ around New Year
                                 'isoWeekYear': {
-                                    '$year': '$timestamp'
+                                    '$isoWeekYear': '$timestamp'
                                 }, 
                                 'isoWeek': {
                                     '$isoWeek': '$timestamp'
