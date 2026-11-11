@@ -1,30 +1,50 @@
-# Stable Protocol API v3 (Multicollateral)
+# Stable Protocol API v3
 
-## Warning: This is only for version 3 of the main contracts.
+Public read-only API of the Money on Chain stable protocols: the users' operations and transactions, the OMoC governance, voting and lending endpoints, and the MoC Liquidity Mining incentives. It is used by the dapps ([stable-protocol-interface](https://github.com/money-on-chain/stable-protocol-interface) and [stable-protocol-interface-v3](https://github.com/money-on-chain/stable-protocol-interface-v3)) and by Grafana for the stats.
 
-| Project              | Version | V3 | 
-|----------------------|---------|----|
-| MOC (Money on Chain) | V1      | ❌  |
-| ROC (RIF on Chain)   | V3      | ✅  |
+It supports both generations of the contracts. Each deployment serves one, picked with `PROTOCOL_VERSION`:
 
-API list operations of the users dapp. This is a requirement for [stable-protocol-interface-v2](https://github.com/money-on-chain/stable-protocol-interface-v2), this service list operations of the users.
+| Project              | Contracts | `PROTOCOL_VERSION` | Indexer |
+|----------------------|-----------|--------------------|---------|
+| MOC (Money on Chain) | V1        | `1`                | [stable-protocol-indexer](https://github.com/money-on-chain/stable-protocol-indexer) and MoC_Incentive |
+| ROC (RIF on Chain)   | V2        | `2` (default)      | [stable-protocol-indexer-v3](https://github.com/money-on-chain/stable-protocol-indexer-v3) |
+
+### Endpoints
+
+Served by every deployment:
+
+- `/v1/omoc/` — OMoC staking, vesting, delay machine and oracle events.
+- `/v1/omoc/voting/` — OMoC proposals, votes and MIPs.
+- `/v1/lending/` — lending operations.
+
+With `PROTOCOL_VERSION=2` (V2 contracts):
+
+- `/v1/operations/` and `/v1/events/` — the users' operations and the protocol events.
+
+With `PROTOCOL_VERSION=1` (MoC V1 contracts):
+
+- `/v1/webapp/transactions/list/` — the users' transactions, as JSON or as a text file (`format=text`). `VENDOR_ADDRESS` and `COMMISSION_SPLITTER_V2` are excluded from the list.
+- `/v1/stats/` — volume, transaction and top transactor stats, as JSON or text.
+- `/v1/incentives/` (`balance/{address}`, `claims/{address}`, `agent/`) — the MoC Liquidity Mining rewards of MoC_Incentive. The `mocin_*` collections are read from `APP_MONGO_DB`, or from `INCENTIVES_MONGO_DB` on the same server when set.
+
+This API replaced the old MoC V1 services (stable-protocol-api, and MoC_Incentive's miniwebservice), and keeps their paths working as aliases, with a `Deprecation: true` response header: `/api/v1/...` is served as `/v1/...`, and `/balance/...`, `/claims/...` and `/agent` as `/v1/incentives/...`. The dapps need no changes.
 
 ### Usage
 
 Requirements:
 
 * Python 3.11+ (the Docker image uses 3.12)
-* Mongo DB installed also DB, User & pass created
-* [Stable-protocol-indexer-v2](https://github.com/money-on-chain/stable-protocol-indexer-v2)Protocol Indexer installed & Running in the same Mongo DB
+* MongoDB, with the database, user and password created
+* The indexer of the deployment's contracts (see the table above), running on the same database
 
 ```
 # Install the requirements:
 pip install -r requirements.txt
 
-# Configure the location of your MongoDB database:
-copy environments/development/.example.env .env
+# Configure the location of your MongoDB database, starting from an example:
+cp environments/development/.roc-development.env .env
 
-# Edit .env file and change settings point Mongo DB uris 
+# Edit .env: set APP_MONGO_URI and APP_MONGO_DB, and PROTOCOL_VERSION=1 for a MoC V1 database
 
 # Start the service
 uvicorn api.app:app --reload
@@ -32,24 +52,27 @@ uvicorn api.app:app --reload
 
 ### Interactive API docs
 
-Go to http://localhost:8000/
+Go to http://localhost:8000/ (disabled with `DOCS_ENABLED=false`).
 
 
 ### Deployed environments
 
+| Environment   | Project   | URL                                              |
+|---------------|-----------|--------------------------------------------------|
+| Testnet       | ROC       | https://api-v2-testnet.rifonchain.com/           |
+| Mainnet       | ROC       | https://api-v2.rifonchain.com/                   |
+| Testnet       | MOC (V1)  | https://api-operations-testnet.moneyonchain.com/ |
+| Testnet       | MOC (V1)  | https://moc-incentives-testnet.moneyonchain.com/ |
+| Mainnet       | MOC (V1)  | https://api-operations.moneyonchain.com/         |
+| Mainnet       | MOC (V1)  | https://moc-incentives.moneyonchain.com/         |
 
-| Environment   | Project   | URL                                    | 
-|---------------|-----------|----------------------------------------|
-| Testnet       | Flipmoney | https://api-testnet.flipmoney.io/      |
-| Mainnet       | Flipmoney | https://api-v2.flipmoney.io/           |
-| Testnet       | ROC       | https://api-v2-testnet.rifonchain.com/ |
-| Mainnet       | ROC       | https://api-v2.rifonchain.com/         |
-| Testnet       | MOC (v1)  | https://api-operations-testnet.moneyonchain.com/ |
-| Mainnet       | MOC (v1)  | https://api-operations.moneyonchain.com/ |
+Each MoC environment is a single service: both its hostnames point to it.
+
+The settings of each environment are in `environments/production/`. `aws_api_build_and_push.sh -e <environment>` builds the image and pushes it to ECR (`moc_testnet`, `moc_mainnet`, `roc_testnet`, `roc_mainnet`).
 
 ### Docker (Recommended)
 
-Build, change path to correct environment
+Build
 
 ```
 docker build -t stable_protocol_api_v2 -f Dockerfile.api .
@@ -67,13 +90,13 @@ docker run -d \
 stable_protocol_api_v2
 ```
 
+For a MoC V1 deployment, also set `PROTOCOL_VERSION=1`, and `VENDOR_ADDRESS` and `COMMISSION_SPLITTER_V2` (see `environments/production/moc-*.env`).
+
+### Settings
+
+`PROTOCOL_VERSION` (default `2`) is the contracts of the deployment's database, which pick the endpoints served besides OMoC, voting and lending (see [Endpoints](#endpoints)).
+
 `EDGE_HEADERS=true` makes the API send the CORS, security and `Cache-Control` headers itself. Set it on deployments served straight from the load balancer, with rate limiting and caching done by Cloudflare. Leave it unset on a deployment still behind the old nginx container, which sends the same headers: browsers reject a doubled `Access-Control-Allow-Origin`.
-
-`PROTOCOL_VERSION` (default `2`) is the stable protocol of the deployment's database, which picks the routers served besides OMoC, voting and lending (served by both):
-
-- `2` — MoC v2 deployments (RoC, Flipmoney...), indexed by stable-protocol-indexer-v3: `/v1/operations/` and `/v1/events/`.
-- `1` — MoC v1, indexed by stable-protocol-indexer: `/v1/webapp/transactions/list/` and `/v1/stats/`, which replace the stable-protocol-api service. `VENDOR_ADDRESS` and `COMMISSION_SPLITTER_V2` are excluded from the transactions list. The old `/api/v1/...` paths keep working as aliases of `/v1/...`, with a `Deprecation: true` response header.
-- Also with `1`, `/v1/incentives/` (`balance/{address}`, `claims/{address}`, `agent/`) serves the MoC Liquidity Mining rewards of MoC_Incentive, replacing its miniwebservice (moc-incentives.moneyonchain.com), whose `/balance/...`, `/claims/...` and `/agent` paths keep working as aliases. The `mocin_*` collections are read from `APP_MONGO_DB`, or from `INCENTIVES_MONGO_DB` on the same server when set.
 
 `ALLOWED_HOSTS` is the `Host` header this backend accepts: set it to the API's own hostname(s) for that environment, never `["*"]` (which disables the check). `/ping` is exempt, so ALB health checks by private IP keep working.
 
@@ -83,5 +106,3 @@ The `/v1/omoc/voting/` endpoints serve the OMoC proposal history from the indexe
 
 - `GOVERNANCE_REGISTRY_URL` — url of `proposals.json`; documents and images are resolved relative to it. Defaults to the `main` branch on raw.githubusercontent.com. Set it empty to disable the registry (proposals are then served with `listed: null`).
 - `GOVERNANCE_NETWORK` — network the API serves, as named in the registry: `rskMainnet` or `rskTestnet`. The `mips` endpoints only return MIPs with a changer on that network (and only that network's changers); empty returns every MIP. Set in `environments/`. Draft MIPs are never listed.
-
-
