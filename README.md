@@ -7,7 +7,7 @@ It supports both generations of the contracts. Each deployment serves one, picke
 | Project              | Contracts | `PROTOCOL_VERSION` | Indexer |
 |----------------------|-----------|--------------------|---------|
 | MOC (Money on Chain) | V1        | `1`                | [stable-protocol-indexer](https://github.com/money-on-chain/stable-protocol-indexer) and MoC_Incentive |
-| ROC (RIF on Chain)   | V2        | `2` (default)      | [stable-protocol-indexer-v3](https://github.com/money-on-chain/stable-protocol-indexer-v3) |
+| ROC (RIF on Chain)   | V3        | `2` (default)      | [stable-protocol-indexer-v3](https://github.com/money-on-chain/stable-protocol-indexer-v3) |
 
 ### Endpoints
 
@@ -17,7 +17,7 @@ Served by every deployment:
 - `/v1/omoc/voting/` — OMoC proposals, votes and MIPs.
 - `/v1/lending/` — lending operations.
 
-With `PROTOCOL_VERSION=2` (V2 contracts):
+With `PROTOCOL_VERSION=2` (V3 contracts):
 
 - `/v1/operations/` and `/v1/events/` — the users' operations and the protocol events.
 
