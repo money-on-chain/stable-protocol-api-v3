@@ -50,6 +50,12 @@ cp environments/development/.roc-development.env .env
 uvicorn api.app:app --reload
 ```
 
+### Tests
+
+```
+python -m unittest discover -s tests -t .
+```
+
 ### Interactive API docs
 
 Go to http://localhost:8000/ (disabled with `DOCS_ENABLED=false`).
@@ -97,6 +103,8 @@ For a MoC V1 deployment, also set `PROTOCOL_VERSION=1`, and `VENDOR_ADDRESS` and
 `PROTOCOL_VERSION` (default `2`) is the contracts of the deployment's database, which pick the endpoints served besides OMoC, voting and lending (see [Endpoints](#endpoints)).
 
 `EDGE_HEADERS=true` makes the API send the CORS, security and `Cache-Control` headers itself. Set it on deployments served straight from the load balancer, with rate limiting and caching done by Cloudflare. Leave it unset on a deployment still behind the old nginx container, which sends the same headers: browsers reject a doubled `Access-Control-Allow-Origin`.
+
+With `EDGE_HEADERS=true`, the access log also shows the visitor's IP, from Cloudflare's `CF-Connecting-IP` header, instead of the load balancer's. It relies on the origin lock: the load balancer only accepts requests coming through Cloudflare (the `X-Origin-Verify` header), so the header can't be forged. Successful `/ping` health checks are left out of the access log on every deployment; failed ones are still logged.
 
 `ALLOWED_HOSTS` is the `Host` header this backend accepts: set it to the API's own hostname(s) for that environment, never `["*"]` (which disables the check). `/ping` is exempt, so ALB health checks by private IP keep working.
 
