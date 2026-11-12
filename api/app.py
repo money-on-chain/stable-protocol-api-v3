@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     await close_db_connect()
 
 
-API_VERSION = '1.3.1'
+API_VERSION = '1.3.2'
 API_TITLE = 'Stable Protocol API v3'
 API_DESCRIPTION = """
 This is a requirement for [stable-protocol-interface-v2](https://github.com/money-on-chain/stable-protocol-interface-v3)
