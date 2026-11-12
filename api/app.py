@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import asynccontextmanager
 from os import getenv
 
@@ -20,6 +21,7 @@ from api.routers import incentives
 from api.models.base import InfoApi
 from api.logger import log
 from api.db import connect_and_init_db, close_db_connect
+from api.access_log import CloudflareClientMiddleware, HealthCheckAccessFilter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -250,8 +252,13 @@ if ALLOWED_HOSTS:
                        allowed_hosts=ALLOWED_HOSTS)
 
 if EDGE_HEADERS:
-    # Added last to be the outermost: errors get the headers too
+    # Added after the others to wrap them: errors get the headers too
     app.add_middleware(EdgeHeadersMiddleware)
+    # Served through Cloudflare, behind the origin lock: log the visitor's
+    # IP instead of the ALB's
+    app.add_middleware(CloudflareClientMiddleware)
+
+logging.getLogger("uvicorn.access").addFilter(HealthCheckAccessFilter())
 
 
 log.info("Starting webservice API version: {0}".format(API_VERSION))
